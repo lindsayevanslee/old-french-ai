@@ -1,0 +1,12 @@
+name: old_french_ai
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.11.8
+  - pip=23.2.1
+  - Pillow=10.2.0
+  - pip:
+    - pillow-heif==0.16.0
+
+prefix: ./envs
