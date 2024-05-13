@@ -2,8 +2,8 @@ import os
 from PIL import Image
 from pillow_heif import register_heif_opener
 
-input_dir = 'data/ME MSS Images/heic/T-F2'
-output_dir = 'data/ME MSS Images/png/T-F2'
+input_dir = 'data/ME MSS Images/heic'
+output_dir = 'data/ME MSS Images/png'
 
 # Create the output directory if it doesn't exist
 os.makedirs(output_dir, exist_ok=True)
