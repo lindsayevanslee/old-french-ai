@@ -1,5 +1,6 @@
 import os
 
+# Print the files in the directories and file counts
 def print_files_in_directories(folder_path):
     for root, dirs, files in os.walk(folder_path):
         print(f"Directory: {root}")
@@ -13,7 +14,7 @@ print_files_in_directories(output_dir)
 
 
 
-
+#compare subdirectories across two root folders and see if they have the same file names and number of files (ignoring extensions)
 def compare_folders(folder1, folder2):
     files1 = set()
     files2 = set()

@@ -8,6 +8,7 @@ output_dir = 'data/ME MSS Images/png'
 # Create the output directory if it doesn't exist
 os.makedirs(output_dir, exist_ok=True)
 
+#print all files present in the input directory
 def print_files_recursively(directory):
     for root, dirs, files in os.walk(directory):
         for file in files:

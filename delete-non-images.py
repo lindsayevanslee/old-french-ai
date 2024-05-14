@@ -1,5 +1,6 @@
 import os
 
+#Delete files with specific extensions
 def delete_files_with_extensions(directory, extensions):
     for root, dirs, files in os.walk(directory):
         for file in files:
@@ -8,7 +9,7 @@ def delete_files_with_extensions(directory, extensions):
                 os.remove(file_path)
                 print(f"Deleted file: {file_path}")
 
-# Example usage
+# Set directory and extensions
 directory = "data/ME MSS Images/heic"
 extensions = ["DS_Stores", ".MOV", ".mov", ".docx"]  # Add your desired file extensions here
 delete_files_with_extensions(directory, extensions)
