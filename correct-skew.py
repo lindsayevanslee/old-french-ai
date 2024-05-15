@@ -1,45 +1,86 @@
 # Description: This script corrects the skew of the image by rotating it to the best angle.
 # adapted from: https://towardsdatascience.com/pre-processing-in-ocr-fc231c6035a7
 
-import sys
+import os
 import matplotlib.pyplot as plt
 import numpy as np
 from PIL import Image as im
 #from scipy.ndimage import interpolation as inter
 from scipy.ndimage import rotate
+from tqdm import tqdm
 
+#set the input directory
+input_dir = 'data/ME MSS Images/png/T-F2' 
 
-#input_file = sys.argv[1]
-#example file
-input_file = 'data/ME MSS Images/png/L1-B/IMG_5658.png'
-output_file_binary = 'data/ME MSS Images/binary/L1-B/IMG_5658.png'
-output_file_skew = 'data/ME MSS Images/skew_corrected/L1-B/IMG_5658.png'
+#set the delta and limit for the rotation, in degrees
+delta = 1
+limit = 15
 
-img = im.open(input_file)
-# convert to binary
-wd, ht = img.size
-pix = np.array(img.convert('1').getdata(), np.uint8)
-bin_img = 1 - (pix.reshape((ht, wd)) / 255.0)
-plt.imshow(bin_img, cmap='gray')
-plt.savefig(output_file_binary)
+# Function to find the best angle to rotate the image to correct skew
 def find_score(arr, angle):
-    #data = inter.rotate(arr, angle, reshape=False, order=0)
     data = rotate(arr, angle, reshape=False, order=0)
     hist = np.sum(data, axis=1)
     score = np.sum((hist[1:] - hist[:-1]) ** 2)
     return hist, score
-delta = 1
-limit = 15
-angles = np.arange(-limit, limit+delta, delta)
-scores = []
-for angle in angles:
-    hist, score = find_score(bin_img, angle)
-    scores.append(score)
-best_score = max(scores)
-best_angle = angles[scores.index(best_score)]
-print('Best angle: {}'.format(best_angle))
-# correct skew
-#data = inter.rotate(bin_img, best_angle, reshape=False, order=0)
-data = rotate(bin_img, best_angle, reshape=False, order=0)
-img = im.fromarray((255 * data).astype("uint8")).convert("RGB")
-img.save(output_file_skew)
+
+# Loop through all files recursively in the input directory
+for root, dirs, files in os.walk(input_dir):
+    print(f"root: {root}")
+    print(f"dirs: {dirs}")
+
+    for filename in tqdm(files):
+
+        #create path of input image
+        input_file = os.path.join(root, filename)
+
+        #create path of output binary image
+        new_root_binary = root.replace('png', 'binary')
+        os.makedirs(new_root_binary, exist_ok=True)
+        output_file_binary = os.path.join(new_root_binary, filename)
+
+        #create output of skew corrected image
+        new_root_skew = root.replace('png', 'skew_corrected')
+        os.makedirs(new_root_skew, exist_ok=True)
+        output_file_skew = os.path.join(new_root_skew, filename)
+
+        # read the image
+        img = im.open(input_file)
+
+        # convert to binary
+        wd, ht = img.size
+        pix = np.array(img.convert('1').getdata(), np.uint8)
+        bin_img = 1 - (pix.reshape((ht, wd)) / 255.0)
+
+        #check if binary image already exists
+        if os.path.exists(output_file_binary):
+            print(f"File already exists: {output_file_binary}")
+            
+        else:
+            print(f"Printing binary file: {input_file} to {output_file_binary}")
+
+            plt.imshow(bin_img, cmap='gray')
+            plt.savefig(output_file_binary)
+
+        #check if skew corrected image alrady exists
+        if os.path.exists(output_file_skew):
+            print(f"File already exists: {output_file_skew}")
+            continue
+        else:
+            print(f"Correcting skew: {output_file_binary} to {output_file_skew}")
+
+            # find best angle
+            angles = np.arange(-limit, limit+delta, delta)
+            scores = []
+
+            for angle in angles:
+                hist, score = find_score(bin_img, angle)
+                scores.append(score)
+
+            best_score = max(scores)
+            best_angle = angles[scores.index(best_score)]
+            print('Best angle: {}'.format(best_angle))
+
+            # correct skew
+            data = rotate(bin_img, best_angle, reshape=False, order=0)
+            img = im.fromarray((255 * data).astype("uint8")).convert("RGB")
+            img.save(output_file_skew)
