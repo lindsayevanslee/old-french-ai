@@ -1,4 +1,5 @@
 import os
+from tqdm import tqdm
 from PIL import Image
 from pillow_heif import register_heif_opener
 
@@ -34,7 +35,7 @@ for root, dirs, files in os.walk(input_dir):
     print(f"root: {root}")
     print(f"dirs: {dirs}")
     #print(f"files: {files}")
-    for filename in files:
+    for filename in tqdm(files):
         # Create the output directory if it doesn't exist
         new_root = root.replace('heic', 'png')
         os.makedirs(new_root, exist_ok=True)
