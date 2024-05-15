@@ -12,6 +12,6 @@ def delete_files_with_extensions(directory, extensions):
                 print(f"Deleted file: {file_path}")
 
 # Set directory and extensions
-directory = "data/ME MSS Images/heic"
+directory = "data/ME MSS Images"
 extensions = ["DS_Store", ".MOV", ".mov", ".docx", ".pdf"]  # Add your desired file extensions here
 delete_files_with_extensions(directory, extensions)
