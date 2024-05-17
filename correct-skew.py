@@ -32,40 +32,46 @@ for root, dirs, files in os.walk(input_dir):
 
         #create path of input image
         input_file = os.path.join(root, filename)
+        print(f"Converting: {input_file}")
 
         #create path of output binary image
         new_root_binary = root.replace('png', 'binary')
         os.makedirs(new_root_binary, exist_ok=True)
         output_file_binary = os.path.join(new_root_binary, filename)
 
-        #create output of skew corrected image
+        #create path of output skew corrected image
         new_root_skew = root.replace('png', 'skew_corrected')
         os.makedirs(new_root_skew, exist_ok=True)
         output_file_skew = os.path.join(new_root_skew, filename)
 
-        # read the image
-        img = im.open(input_file)
-
-        # convert to binary
-        wd, ht = img.size
-        pix = np.array(img.convert('1').getdata(), np.uint8)
-        bin_img = 1 - (pix.reshape((ht, wd)) / 255.0)
-
-        #check if binary image already exists
-        if os.path.exists(output_file_binary):
-            print(f"File already exists: {output_file_binary}")
-            
-        else:
-            print(f"Printing binary file: {input_file} to {output_file_binary}")
-
-            plt.imshow(bin_img, cmap='gray')
-            plt.savefig(output_file_binary)
-
-        #check if skew corrected image alrady exists
+        #check if skew corrected image already exists. If so, skip iteration (we assume the binary file also exists, so skipping that too)
         if os.path.exists(output_file_skew):
             print(f"File already exists: {output_file_skew}")
             continue
-        else:
+        else: 
+            # read the image
+            img = im.open(input_file)
+
+            # convert to binary
+            wd, ht = img.size
+            try:
+                pix = np.array(img.convert('1').getdata(), np.uint8)
+            except OSError:
+                print(f"Failed to process image: {input_file}. The file may be truncated or corrupted.")
+                continue
+            bin_img = 1 - (pix.reshape((ht, wd)) / 255.0)
+
+            #check if binary image already exists
+            if os.path.exists(output_file_binary):
+                print(f"File already exists: {output_file_binary}")
+                
+            else:
+                print(f"Printing binary file: {input_file} to {output_file_binary}")
+
+                plt.imshow(bin_img, cmap='gray')
+                plt.savefig(output_file_binary)
+
+
             print(f"Correcting skew: {output_file_binary} to {output_file_skew}")
 
             # find best angle
