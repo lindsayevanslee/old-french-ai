@@ -1,5 +1,5 @@
 #secret keys
-secrets.py
+my_secrets.py
 
 #source data
 data/

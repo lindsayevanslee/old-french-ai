@@ -1,5 +1,5 @@
 import os
-from secrets import replicate_key
+from my_secrets import replicate_key
 import replicate
 
 
