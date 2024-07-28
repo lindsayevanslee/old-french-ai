@@ -7,8 +7,8 @@ def print_files_in_directories(folder_path):
         print(f"Number of files: {len(files)}")
         print()
 
-input_dir = 'data/ME MSS Images/heic'
-output_dir = 'data/ME MSS Images/png'
+input_dir = 'data/ME MSS Images/test images folder structure/heic'
+output_dir = 'data/ME MSS Images/test images folder structure/output'
 print_files_in_directories(input_dir)
 print_files_in_directories(output_dir)
 
@@ -45,8 +45,7 @@ def compare_subdirectories(folder1, folder2):
         print(f"Result: {result}")
         print()
 
-input_dir = 'data/ME MSS Images/heic'
-output_dir = 'data/ME MSS Images/png'
+
 compare_subdirectories(input_dir, output_dir)
 
 

@@ -3,8 +3,8 @@ from tqdm import tqdm
 from PIL import Image
 from pillow_heif import register_heif_opener
 
-input_dir = 'data/ME MSS Images/heic'
-output_dir = 'data/ME MSS Images/png'
+input_dir = 'data/ME MSS Images/test images folder structure/heic'
+output_dir = 'data/ME MSS Images/test images folder structure/output'
 
 # Create the output directory if it doesn't exist
 os.makedirs(output_dir, exist_ok=True)
@@ -37,12 +37,13 @@ for root, dirs, files in os.walk(input_dir):
     #print(f"files: {files}")
     for filename in tqdm(files):
         # Create the output directory if it doesn't exist
-        new_root = root.replace('heic', 'png')
+        new_root = os.path.join(root.replace('heic', 'output'), os.path.splitext(filename)[0])
+        #print(new_root)
         os.makedirs(new_root, exist_ok=True)
         
         # Get path of original image
         orig_path = os.path.join(root, filename)
-        #print(heic_path)
+        #print(orig_path)
 
         # Get the PNG filename and path
         png_filename = os.path.splitext(filename)[0] + '.png'
@@ -50,6 +51,8 @@ for root, dirs, files in os.walk(input_dir):
         png_path = os.path.join(new_root, png_filename)
         #print(png_path)
 
+
+        #"""
         # If the PNG file already exists, skip the conversion
         if os.path.exists(png_path):
             print(f"File already exists: {png_path}")
@@ -80,6 +83,8 @@ for root, dirs, files in os.walk(input_dir):
         
         # Close the image
         orig_image.close()
+
+        #"""
 
 
 print('Conversion complete!')
