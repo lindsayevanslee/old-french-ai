@@ -14,8 +14,6 @@ def black_out_background(image_path, save_intermediates=False):
         if save_intermediates:
             cv2.imwrite(os.path.join(output_dir, f"{name}.png"), img)
 
-    #save_step("1_original", original)
-
     # Convert the image to grayscale
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     save_step("2_grayscale", gray)
@@ -36,17 +34,21 @@ def black_out_background(image_path, save_intermediates=False):
     cv2.drawContours(contour_image, contours, -1, (0, 255, 0), 3)
     save_step("5_all_contours", contour_image)
 
-    # Find the largest contour, which should be the book
-    largest_contour = max(contours, key=cv2.contourArea)
+    # Sort contours by area in descending order
+    sorted_contours = sorted(contours, key=cv2.contourArea, reverse=True)
 
-    # Draw the largest contour
-    largest_contour_image = original.copy()
-    cv2.drawContours(largest_contour_image, [largest_contour], -1, (0, 255, 0), 3)
-    save_step("6_largest_contour", largest_contour_image)
+    # Select contours that are likely to be pages
+    total_area = gray.shape[0] * gray.shape[1]
+    page_contours = [cnt for cnt in sorted_contours if cv2.contourArea(cnt) > total_area * 0.1]
 
-    # Create a mask from the largest contour
+    # Draw the selected contours
+    selected_contours_image = original.copy()
+    cv2.drawContours(selected_contours_image, page_contours, -1, (0, 255, 0), 3)
+    save_step("6_selected_contours", selected_contours_image)
+
+    # Create a mask from the selected contours
     mask = np.zeros(gray.shape, dtype=np.uint8)
-    cv2.drawContours(mask, [largest_contour], -1, (255), thickness=cv2.FILLED)
+    cv2.drawContours(mask, page_contours, -1, (255), thickness=cv2.FILLED)
     save_step("7_mask", mask)
 
     # Apply the mask to the original image
