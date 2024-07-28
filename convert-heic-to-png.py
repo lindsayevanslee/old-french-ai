@@ -46,7 +46,8 @@ for root, dirs, files in os.walk(input_dir):
         #print(orig_path)
 
         # Get the PNG filename and path
-        png_filename = os.path.splitext(filename)[0] + '.png'
+        #png_filename = os.path.splitext(filename)[0] + '.png'
+        png_filename = "0_converted_to_png.png"
         #print(png_filename)
         png_path = os.path.join(new_root, png_filename)
         #print(png_path)
