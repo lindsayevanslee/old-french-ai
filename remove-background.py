@@ -2,21 +2,19 @@ import cv2
 import numpy as np
 import os
 
-def black_out_background(image_path, output_dir, save_intermediates=False):
+def black_out_background(image_path, save_intermediates=False):
     # Read the image
     image = cv2.imread(image_path)
     original = image.copy()
 
-    # Create a subdirectory for this image's output
-    base_name = os.path.splitext(os.path.basename(image_path))[0]
-    image_output_dir = os.path.join(output_dir, base_name)
-    os.makedirs(image_output_dir, exist_ok=True)
+    # Get the directory of the input file
+    output_dir = os.path.dirname(image_path)
 
     def save_step(name, img):
         if save_intermediates:
-            cv2.imwrite(os.path.join(image_output_dir, f"{name}.jpg"), img)
+            cv2.imwrite(os.path.join(output_dir, f"{name}.png"), img)
 
-    save_step("1_original", original)
+    #save_step("1_original", original)
 
     # Convert the image to grayscale
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
@@ -62,29 +60,24 @@ def black_out_background(image_path, output_dir, save_intermediates=False):
     final_result = cv2.bitwise_or(result, black_background)
     
     # Always save the final result
-    cv2.imwrite(os.path.join(image_output_dir, 'final_result.jpg'), final_result)
+    cv2.imwrite(os.path.join(output_dir, 'background_removed.png'), final_result)
 
     if save_intermediates:
-        print(f"Processed {image_path}. Intermediate outputs saved in {image_output_dir}")
+        print(f"Processed {image_path}. Intermediate outputs saved in {output_dir}")
     else:
-        print(f"Processed {image_path}. Final result saved in {image_output_dir}")
+        print(f"Processed {image_path}. Final result saved in {output_dir}")
 
     return final_result
 
+def process_directory(input_directory, save_intermediates=False):
+    for root, dirs, files in os.walk(input_directory):
+        if '0_converted_to_png.png' in files:
+            image_path = os.path.join(root, '0_converted_to_png.png')
+            print(f"Processing: {image_path}")
+            black_out_background(image_path, save_intermediates)
+
 # Usage example
-input_directory = 'data/ME MSS Images/test images'
-output_directory = 'data/ME MSS Images/test output'
-save_intermediates = False  # Set this to False to skip saving intermediate outputs
+input_directory = 'data/ME MSS Images/test output'
+save_intermediates = True  # Set this to False to skip saving intermediate outputs
 
-# Create output directory if it doesn't exist
-os.makedirs(output_directory, exist_ok=True)
-
-# Iterate over all files in the input directory
-for filename in os.listdir(input_directory):
-    # Check if the file is an image
-    if filename.lower().endswith(('.png', '.jpg', '.jpeg')):
-        # Construct the full path of the input file
-        image_path = os.path.join(input_directory, filename)
-        print(f"Processing: {image_path}")
-        # Call the function to black out the background and optionally save intermediate outputs
-        black_out_background(image_path, output_directory, save_intermediates)
+process_directory(input_directory, save_intermediates)
