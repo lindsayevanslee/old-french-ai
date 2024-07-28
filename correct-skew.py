@@ -10,7 +10,7 @@ from scipy.ndimage import rotate
 from tqdm import tqdm
 
 #set the input directory
-input_dir = 'data/ME MSS Images/png' 
+input_dir = 'data/ME MSS Images/output' 
 
 #set the delta and limit for the rotation, in degrees
 delta = 1
@@ -30,63 +30,70 @@ for root, dirs, files in os.walk(input_dir):
 
     for filename in tqdm(files):
 
-        #create path of input image
-        input_file = os.path.join(root, filename)
-        print(f"Converting: {input_file}")
+        if filename == "0_converted_to_png.png":
 
-        #create path of output binary image
-        new_root_binary = root.replace('png', 'binary')
-        os.makedirs(new_root_binary, exist_ok=True)
-        output_file_binary = os.path.join(new_root_binary, filename)
+            #create path of input image
+            input_file = os.path.join(root, filename)
+            print(f"Converting: {input_file}")
 
-        #create path of output skew corrected image
-        new_root_skew = root.replace('png', 'skew_corrected')
-        os.makedirs(new_root_skew, exist_ok=True)
-        output_file_skew = os.path.join(new_root_skew, filename)
+            #create path of output binary image
+            #new_root_binary = root.replace('png', 'binary')
+            #os.makedirs(new_root_binary, exist_ok=True)
+            #output_file_binary = os.path.join(new_root_binary, filename)
+            output_file_binary = os.path.join(root, "02_binary.png")
 
-        #check if skew corrected image already exists. If so, skip iteration (we assume the binary file also exists, so skipping that too)
-        if os.path.exists(output_file_skew):
-            print(f"File already exists: {output_file_skew}")
-            continue
-        else: 
-            # read the image
-            img = im.open(input_file)
+            #create path of output skew corrected image
+            #new_root_skew = root.replace('png', 'skew_corrected')
+            #os.makedirs(new_root_skew, exist_ok=True)
+            #output_file_skew = os.path.join(new_root_skew, filename)
+            output_file_skew = os.path.join(root, "03_skew_corrected.png")
 
-            # convert to binary
-            wd, ht = img.size
-            try:
-                pix = np.array(img.convert('1').getdata(), np.uint8)
-            except OSError:
-                print(f"Failed to process image: {input_file}. The file may be truncated or corrupted.")
+            #check if skew corrected image already exists. If so, skip iteration (we assume the binary file also exists, so skipping that too)
+            if os.path.exists(output_file_skew):
+                print(f"File already exists: {output_file_skew}")
                 continue
-            bin_img = 1 - (pix.reshape((ht, wd)) / 255.0)
+            else: 
+                # read the image
+                img = im.open(input_file)
 
-            #check if binary image already exists
-            if os.path.exists(output_file_binary):
-                print(f"File already exists: {output_file_binary}")
-                
-            else:
-                print(f"Printing binary file: {input_file} to {output_file_binary}")
+                # convert to binary
+                wd, ht = img.size
+                try:
+                    pix = np.array(img.convert('1').getdata(), np.uint8)
+                except OSError:
+                    print(f"Failed to process image: {input_file}. The file may be truncated or corrupted.")
+                    continue
+                bin_img = 1 - (pix.reshape((ht, wd)) / 255.0)
 
-                plt.imshow(bin_img, cmap='gray')
-                plt.savefig(output_file_binary)
+                #check if binary image already exists
+                if os.path.exists(output_file_binary):
+                    print(f"File already exists: {output_file_binary}")
+                    
+                else:
+                    print(f"Printing binary file: {input_file} to {output_file_binary}")
+
+                    plt.imshow(bin_img, cmap='gray')
+                    plt.savefig(output_file_binary)
 
 
-            print(f"Correcting skew: {output_file_binary} to {output_file_skew}")
+                print(f"Correcting skew: {output_file_binary} to {output_file_skew}")
 
-            # find best angle
-            angles = np.arange(-limit, limit+delta, delta)
-            scores = []
+                # find best angle
+                angles = np.arange(-limit, limit+delta, delta)
+                scores = []
 
-            for angle in angles:
-                hist, score = find_score(bin_img, angle)
-                scores.append(score)
+                for angle in angles:
+                    hist, score = find_score(bin_img, angle)
+                    scores.append(score)
 
-            best_score = max(scores)
-            best_angle = angles[scores.index(best_score)]
-            print('Best angle: {}'.format(best_angle))
+                best_score = max(scores)
+                best_angle = angles[scores.index(best_score)]
+                print('Best angle: {}'.format(best_angle))
 
-            # correct skew
-            data = rotate(bin_img, best_angle, reshape=False, order=0)
-            img = im.fromarray((255 * data).astype("uint8")).convert("RGB")
-            img.save(output_file_skew)
+                # correct skew
+                data = rotate(bin_img, best_angle, reshape=False, order=0)
+                img = im.fromarray((255 * data).astype("uint8")).convert("RGB")
+                img.save(output_file_skew)
+            
+        else:
+            continue

@@ -4,7 +4,7 @@ import os
 import shutil
 
 # Set the folder path where all output will be stored
-folder_path = 'data/ME MSS Images/png'
+folder_path = 'data/ME MSS Images/output'
 
 def put_files_in_own_folder(folder_path):
     for root, dirs, files in os.walk(folder_path):

@@ -3,8 +3,8 @@ from tqdm import tqdm
 from PIL import Image
 from pillow_heif import register_heif_opener
 
-input_dir = 'data/ME MSS Images/test images folder structure/heic'
-output_dir = 'data/ME MSS Images/test images folder structure/output'
+input_dir = 'data/ME MSS Images/heic'
+output_dir = 'data/ME MSS Images/output'
 
 # Create the output directory if it doesn't exist
 os.makedirs(output_dir, exist_ok=True)
