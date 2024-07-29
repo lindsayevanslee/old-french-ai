@@ -10,7 +10,7 @@ from scipy.ndimage import rotate
 from tqdm import tqdm
 
 #set the input directory
-input_dir = 'data/ME MSS Images/output' 
+input_dir = 'data/ME MSS Images/test output' 
 
 #set the delta and limit for the rotation, in degrees
 delta = 1
@@ -30,7 +30,8 @@ for root, dirs, files in os.walk(input_dir):
 
     for filename in tqdm(files):
 
-        if filename == "0_converted_to_png.png":
+        #if filename == "0_converted_to_png.png":
+        if filename == "09_background_removed.png":
 
             #create path of input image
             input_file = os.path.join(root, filename)
