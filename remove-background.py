@@ -16,15 +16,15 @@ def black_out_background(image_path, save_intermediates=False):
 
     # Convert the image to grayscale
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    save_step("2_grayscale", gray)
+    save_step("02_grayscale", gray)
 
     # Apply GaussianBlur to reduce noise and improve contour detection
     blurred = cv2.GaussianBlur(gray, (5, 5), 0)
-    save_step("3_blurred", blurred)
+    save_step("03_blurred", blurred)
 
     # Apply a binary threshold to the image
     _, thresholded = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    save_step("4_thresholded", thresholded)
+    save_step("04_thresholded", thresholded)
 
     # Find contours in the thresholded image
     contours, _ = cv2.findContours(thresholded, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -32,7 +32,7 @@ def black_out_background(image_path, save_intermediates=False):
     # Draw all contours
     contour_image = original.copy()
     cv2.drawContours(contour_image, contours, -1, (0, 255, 0), 3)
-    save_step("5_all_contours", contour_image)
+    save_step("05_all_contours", contour_image)
 
     # Sort contours by area in descending order
     sorted_contours = sorted(contours, key=cv2.contourArea, reverse=True)
@@ -44,16 +44,16 @@ def black_out_background(image_path, save_intermediates=False):
     # Draw the selected contours
     selected_contours_image = original.copy()
     cv2.drawContours(selected_contours_image, page_contours, -1, (0, 255, 0), 3)
-    save_step("6_selected_contours", selected_contours_image)
+    save_step("06_selected_contours", selected_contours_image)
 
     # Create a mask from the selected contours
     mask = np.zeros(gray.shape, dtype=np.uint8)
     cv2.drawContours(mask, page_contours, -1, (255), thickness=cv2.FILLED)
-    save_step("7_mask", mask)
+    save_step("07_mask", mask)
 
     # Apply the mask to the original image
     result = cv2.bitwise_and(original, original, mask=mask)
-    save_step("8_masked_result", result)
+    save_step("08_masked_result", result)
 
     # Create a black background
     black_background = np.zeros_like(original)
@@ -62,7 +62,7 @@ def black_out_background(image_path, save_intermediates=False):
     final_result = cv2.bitwise_or(result, black_background)
     
     # Always save the final result
-    cv2.imwrite(os.path.join(output_dir, 'background_removed.png'), final_result)
+    cv2.imwrite(os.path.join(output_dir, '09_background_removed.png'), final_result)
 
     if save_intermediates:
         print(f"Processed {image_path}. Intermediate outputs saved in {output_dir}")
