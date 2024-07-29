@@ -1,16 +1,18 @@
 import os
 from PIL import Image
+from tqdm import tqdm
 
 #Set input directory
-input_dir = 'data/ME MSS Images/test images folder structure/output/O-E'
+input_dir = 'data/ME MSS Images/output'
 
 mb_limit = 10
 bytes_to_mb = 1000 * 1000 #Finder uses base 10, but many programming languages use base 2
 
 def reduce_image_size(input_dir):
     for root, dirs, files in os.walk(input_dir):
-        for file in files:
-            if file.endswith(".jpg") or file.endswith(".png"):
+        for file in tqdm(files):
+            #if file.endswith(".jpg") or file.endswith(".png"):
+            if file == "0_converted_to_png.png":
                 file_path = os.path.join(root, file)
                 #file_size = os.path.getsize(file_path)
                 file_size = os.stat(file_path).st_size
