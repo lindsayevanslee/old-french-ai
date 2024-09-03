@@ -41,13 +41,13 @@ for root, dirs, files in os.walk(input_dir):
             #new_root_binary = root.replace('png', 'binary')
             #os.makedirs(new_root_binary, exist_ok=True)
             #output_file_binary = os.path.join(new_root_binary, filename)
-            output_file_binary = os.path.join(root, "02_binary.png")
+            output_file_binary = os.path.join(root, "10_binary.png")
 
             #create path of output skew corrected image
             #new_root_skew = root.replace('png', 'skew_corrected')
             #os.makedirs(new_root_skew, exist_ok=True)
             #output_file_skew = os.path.join(new_root_skew, filename)
-            output_file_skew = os.path.join(root, "03_skew_corrected.png")
+            output_file_skew = os.path.join(root, "11_skew_corrected.png")
 
             #check if skew corrected image already exists. If so, skip iteration (we assume the binary file also exists, so skipping that too)
             if os.path.exists(output_file_skew):
@@ -90,6 +90,11 @@ for root, dirs, files in os.walk(input_dir):
                 best_score = max(scores)
                 best_angle = angles[scores.index(best_score)]
                 print('Best angle: {}'.format(best_angle))
+                # save the angle of the corrected skew in a text file
+                angle_file = os.path.join(root, "skew_angle.txt")
+                with open(angle_file, 'w') as f:
+                    f.write(str(best_angle))
+
 
                 # correct skew
                 data = rotate(bin_img, best_angle, reshape=False, order=0)
