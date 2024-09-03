@@ -73,13 +73,25 @@ def black_out_background(image_path, save_intermediates=False):
 
 def process_directory(input_directory, save_intermediates=False):
     for root, dirs, files in os.walk(input_directory):
-        if '0_converted_to_png.png' in files:
+
+        print(f"root: {root}")
+        print(f"dirs: {dirs}")
+        print(f"files: {files}")
+
+        if '01_resized.png' in files:
+            image_path = os.path.join(root, '01_resized.png')
+            print(f"Processing: {image_path}")
+            black_out_background(image_path, save_intermediates)        
+        elif '0_converted_to_png.png' in files:
             image_path = os.path.join(root, '0_converted_to_png.png')
             print(f"Processing: {image_path}")
             black_out_background(image_path, save_intermediates)
+        else:
+            print(f"No suitable image found in {root}")
 
 # Usage example
 input_directory = 'data/ME MSS Images/test output'
 save_intermediates = True  # Set this to False to skip saving intermediate outputs
 
 process_directory(input_directory, save_intermediates)
+
