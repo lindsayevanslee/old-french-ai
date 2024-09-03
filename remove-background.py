@@ -74,6 +74,10 @@ def black_out_background(image_path, save_intermediates=False):
 def process_directory(input_directory, save_intermediates=False):
     for root, dirs, files in os.walk(input_directory):
 
+        #skip the old directory
+        if root.endswith("old"):
+            continue
+
         print(f"root: {root}")
         print(f"dirs: {dirs}")
         print(f"files: {files}")

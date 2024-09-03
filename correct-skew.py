@@ -25,6 +25,11 @@ def find_score(arr, angle):
 
 # Loop through all files recursively in the input directory
 for root, dirs, files in os.walk(input_dir):
+    
+    #skip the old directory
+    if root.endswith("old"):
+        continue
+
     print(f"root: {root}")
     print(f"dirs: {dirs}")
 
