@@ -82,6 +82,9 @@ def process_directory(input_directory, save_intermediates=False):
         print(f"dirs: {dirs}")
         print(f"files: {files}")
 
+        if '09_background_removed.png' in files:
+            print(f"Skipping {root} as background has already been removed")
+            continue
         if '01_resized.png' in files:
             image_path = os.path.join(root, '01_resized.png')
             print(f"Processing: {image_path}")
@@ -94,7 +97,7 @@ def process_directory(input_directory, save_intermediates=False):
             print(f"No suitable image found in {root}")
 
 # Usage example
-input_directory = 'data/ME MSS Images/test output'
+input_directory = 'data/ME MSS Images/output'
 save_intermediates = True  # Set this to False to skip saving intermediate outputs
 
 process_directory(input_directory, save_intermediates)
