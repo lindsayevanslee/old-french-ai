@@ -10,7 +10,7 @@ from scipy.ndimage import rotate
 from tqdm import tqdm
 
 #set the input directory
-input_dir = 'data/ME MSS Images/test output' 
+input_dir = 'data/ME MSS Images/output' 
 
 #set the delta and limit for the rotation, in degrees
 delta = 1
