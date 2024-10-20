@@ -2,12 +2,14 @@ import os
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset, DataLoader, random_split
 from torchvision import transforms
 from PIL import Image
 import numpy as np
 from inpainting_model import UNetInpaint
 from tqdm import tqdm
+from skimage.metrics import peak_signal_noise_ratio as psnr
+from skimage.metrics import structural_similarity as ssim
 
 class ManuscriptInpaintingDataset(Dataset):
     def __init__(self, mutilations_dir, excisions_dir, transform=None):
@@ -68,7 +70,8 @@ class ManuscriptInpaintingDataset(Dataset):
 
 def train_model(
     model,
-    dataloader,
+    train_loader,
+    val_loader,
     criterion,
     optimizer,
     device,
@@ -81,7 +84,8 @@ def train_model(
     
     Args:
         model (nn.Module): The neural network model.
-        dataloader (DataLoader): DataLoader for training data.
+        train_loader (DataLoader): DataLoader for training data.
+        val_loader (DataLoader): DataLoader for validation data.
         criterion: Loss function.
         optimizer: Optimizer.
         device: Device to train on ('cuda' or 'cpu').
@@ -92,9 +96,10 @@ def train_model(
     model.to(device)
     
     for epoch in range(num_epochs):
+        # Training Phase
         model.train()
         running_loss = 0.0
-        progress_bar = tqdm(dataloader, desc=f"Epoch [{epoch+1}/{num_epochs}]")
+        progress_bar = tqdm(train_loader, desc=f"Epoch [{epoch+1}/{num_epochs}] (Train)")
         
         for inputs, targets in progress_bar:
             inputs = inputs.to(device)    # [B, 4, H, W]
@@ -112,8 +117,40 @@ def train_model(
             running_loss += loss.item() * inputs.size(0)
             progress_bar.set_postfix({'Loss': loss.item()})
         
-        epoch_loss = running_loss / len(dataloader.dataset)
-        print(f"Epoch [{epoch+1}/{num_epochs}], Loss: {epoch_loss:.4f}")
+        epoch_loss = running_loss / len(train_loader.dataset)
+        print(f"Epoch [{epoch+1}/{num_epochs}], Training Loss: {epoch_loss:.4f}")
+        
+        # Validation Phase
+        model.eval()
+        val_running_loss = 0.0
+        psnr_total = 0.0
+        ssim_total = 0.0
+        
+        with torch.no_grad():
+            for inputs, targets in tqdm(val_loader, desc=f"Epoch [{epoch+1}/{num_epochs}] (Val)"):
+                inputs = inputs.to(device)
+                targets = targets.to(device)
+                
+                outputs = model(inputs)
+                loss = criterion(outputs, targets)
+                
+                val_running_loss += loss.item() * inputs.size(0)
+                
+                # Convert tensors to numpy arrays for metric calculation
+                outputs_np = outputs.cpu().numpy()
+                targets_np = targets.cpu().numpy()
+                
+                for i in range(outputs_np.shape[0]):
+                    # PSNR and SSIM expect HWC and range [0,1]
+                    psnr_val = psnr(targets_np[i].transpose(1, 2, 0), outputs_np[i].transpose(1, 2, 0), data_range=1)
+                    ssim_val = ssim(targets_np[i].transpose(1, 2, 0), outputs_np[i].transpose(1, 2, 0), multichannel=True, data_range=1)
+                    psnr_total += psnr_val
+                    ssim_total += ssim_val
+        
+        val_loss = val_running_loss / len(val_loader.dataset)
+        avg_psnr = psnr_total / len(val_loader.dataset)
+        avg_ssim = ssim_total / len(val_loader.dataset)
+        print(f"Epoch [{epoch+1}/{num_epochs}], Validation Loss: {val_loss:.4f}, PSNR: {avg_psnr:.2f}, SSIM: {avg_ssim:.4f}")
         
         # Save the model every 'save_every' epochs
         if (epoch + 1) % save_every == 0:
@@ -127,16 +164,15 @@ def train_model(
 
 if __name__ == "__main__":
     # Paths to directories
-    complete_dir = 'data/digitized versions/Vies des saints/jpeg/'      # Not used directly
     mutilations_dir = 'data/digitized versions/Vies des saints/mutilations/'
     excisions_dir = 'data/digitized versions/Vies des saints/excisions/'
     
     # Hyperparameters
     num_epochs = 50
-    batch_size = 16
+    batch_size = 4          # Reduced batch size due to larger image size
     learning_rate = 1e-4
-    img_size = 256
-    mask_ratio = 0.2  # Should match data_preparation.py
+    img_size = 1000         # Updated image size
+    mask_ratio = 0.2        # Should match data_preparation.py
     
     # Device configuration
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -148,17 +184,32 @@ if __name__ == "__main__":
         transforms.ToTensor(),
     ])
     
-    # Initialize Dataset and DataLoader
+    # Initialize Dataset
     dataset = ManuscriptInpaintingDataset(
         mutilations_dir=mutilations_dir,
         excisions_dir=excisions_dir,
         transform=transform
     )
     
-    dataloader = DataLoader(
-        dataset,
+    # Split dataset into training and validation (e.g., 80% train, 20% val)
+    total_size = len(dataset)
+    val_size = int(0.2 * total_size)
+    train_size = total_size - val_size
+    train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
+    
+    # Initialize DataLoaders
+    train_loader = DataLoader(
+        train_dataset,
         batch_size=batch_size,
         shuffle=True,
+        num_workers=4,
+        pin_memory=True if device.type == 'cuda' else False
+    )
+    
+    val_loader = DataLoader(
+        val_dataset,
+        batch_size=batch_size,
+        shuffle=False,
         num_workers=4,
         pin_memory=True if device.type == 'cuda' else False
     )
@@ -176,7 +227,8 @@ if __name__ == "__main__":
     # Start Training
     train_model(
         model=model,
-        dataloader=dataloader,
+        train_loader=train_loader,
+        val_loader=val_loader,
         criterion=criterion,
         optimizer=optimizer,
         device=device,
