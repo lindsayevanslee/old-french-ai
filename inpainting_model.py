@@ -41,14 +41,16 @@ class UNetInpaint(nn.Module):
         self.bottleneck = DoubleConv(features[-1], features[-1]*2)
         
         # Decoder: Upsampling path
+        # Use a copy of the features list to avoid modifying the original list
+        reversed_features = features[::-1]
+        
         self.upconvs = nn.ModuleList()
         self.decoder = nn.ModuleList()
-        for feature in reversed(features):
+        for feature in reversed_features:
             self.upconvs.append(
-                nn.ConvTranspose2d(features[-1]*2, feature, kernel_size=2, stride=2)
+                nn.ConvTranspose2d(feature*2, feature, kernel_size=2, stride=2)
             )
-            self.decoder.append(DoubleConv(features[-1]*2, feature))
-            features[-1] = feature  # Update the feature size for the next layer
+            self.decoder.append(DoubleConv(feature*2, feature))
         
         # Final Convolution
         self.final_conv = nn.Conv2d(features[0], out_channels, kernel_size=1)
@@ -67,7 +69,7 @@ class UNetInpaint(nn.Module):
         
         # Decoder
         skip_connections = skip_connections[::-1]
-        for idx in range(0, len(self.upconvs)):
+        for idx in range(len(self.upconvs)):
             x = self.upconvs[idx](x)
             skip_connection = skip_connections[idx]
             
@@ -81,8 +83,8 @@ class UNetInpaint(nn.Module):
         return self.final_conv(x)
 
 if __name__ == "__main__":
-    # Test the model with a dummy input
+    # Test the model with a dummy input of size 1000x1000
     model = UNetInpaint()
-    x = torch.randn((1, 4, 256, 256))  # Batch size 1, 4 channels (RGB + Mask), 256x256
+    x = torch.randn((1, 4, 1000, 1000))  # Batch size 1, 4 channels (RGB + Mask), 1000x1000
     out = model(x)
-    print(out.shape)  # Expected Output: torch.Size([1, 3, 256, 256])
+    print(out.shape)  # Expected Output: torch.Size([1, 3, 1000, 1000])
