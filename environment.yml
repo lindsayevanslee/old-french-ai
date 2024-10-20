@@ -13,6 +13,9 @@ dependencies:
   - scipy=1.13.0
   - tqdm=4.66.4
   - pdf2image=1.17.0
+  - pytorch=2.4.0
+  - torchvision=0.19.1
+
   - pip:
     - pillow-heif==0.16.0
 
