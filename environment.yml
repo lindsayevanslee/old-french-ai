@@ -15,6 +15,7 @@ dependencies:
   - pdf2image=1.17.0
   - pytorch=2.4.0
   - torchvision=0.19.1
+  - scikit-image=0.24.0
 
   - pip:
     - pillow-heif==0.16.0
