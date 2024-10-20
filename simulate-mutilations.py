@@ -86,7 +86,7 @@ def generate_and_save_mutilations(
     complete_dir='data/digitized versions/Vies des saints/jpeg/',
     mutilations_dir='data/digitized versions/Vies des saints/mutilations/',
     excisions_dir='data/digitized versions/Vies des saints/excisions/',
-    img_size=256
+    img_size=1000
 ):
     # Create output directories if they don't exist
     os.makedirs(mutilations_dir, exist_ok=True)
