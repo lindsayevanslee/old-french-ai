@@ -19,3 +19,7 @@ if __name__ == "__main__":
     pdf_path = 'data/digitized versions/Vies des saints/original/Vies_de_saints_en_français__btv1b9063234c.pdf'
     output_folder = 'data/digitized versions/Vies des saints/jpeg'
     pdf_to_jpeg(pdf_path, output_folder)
+
+    #delete page_1.jpeg and page_2.jpeg
+    os.remove('data/digitized versions/Vies des saints/jpeg/page_1.jpeg')
+    os.remove('data/digitized versions/Vies des saints/jpeg/page_2.jpeg')
