@@ -39,57 +39,66 @@ class ManuscriptDataset(Dataset):
         # Create mask
         mask = self.generate_random_mask(image_transformed.size(1), image_transformed.size(2))
 
-        # Apply mask to image
-        masked_image = image_transformed * mask
+        # Apply mask to image to create mutilated image
+        mutilated_image = image_transformed * mask
 
-        return masked_image, mask, image, img_name
+        # Create excision image by removing the mutilated parts
+        excision_image = image_transformed * (1 - mask)
+
+        return mutilated_image, excision_image, img_name
 
     def generate_random_mask(self, height, width):
-        mask = Image.new('L', (width, height), 1)
+        mask = Image.new('L', (width, height), 1)  # Start with all ones (no masking)
         draw = ImageDraw.Draw(mask)
 
-        # Define mask size
+        # Define mask size (20% of the smallest dimension)
         mask_size = int(self.mask_ratio * min(height, width))
         top = random.randint(0, height - mask_size)
         left = random.randint(0, width - mask_size)
         bottom = top + mask_size
         right = left + mask_size
 
-        # Draw rectangle mask
+        # Draw rectangle mask (0 represents masked area)
         draw.rectangle([left, top, right, bottom], fill=0)
+
         mask = np.array(mask).astype(np.float32)
         mask = torch.from_numpy(mask).unsqueeze(0)  # Shape: [1, H, W]
         return mask
 
-def save_mutiliation(masked_tensor, save_path):
+def save_image(tensor, save_path):
     """
-    Save the masked (mutilated) image to the specified path.
-    
-    masked_tensor: Tensor of shape [3, H, W]
-    save_path: Path to save the masked image
+    Save a tensor as a PIL Image.
+
+    tensor: Tensor of shape [3, H, W]
+    save_path: Path to save the image
     """
-    # Clamp the tensor to [0,1] range
-    masked_tensor = torch.clamp(masked_tensor, 0, 1)
-    
+    # Clamp the tensor to [0,1] range to avoid potential issues
+    tensor = torch.clamp(tensor, 0, 1)
+
     # Convert tensor to PIL Image
     to_pil = transforms.ToPILImage()
-    masked_image = to_pil(masked_tensor.cpu())
+    image = to_pil(tensor.cpu())
 
     # Save the image
-    masked_image.save(save_path)
+    image.save(save_path)
 
-def generate_and_save_mutiliations(
+def generate_and_save_mutilations(
     complete_dir='data/digitized versions/Vies des saints/jpeg/',
-    mutiliations_dir='data/digitized versions/Vies des saints/mutiliations/',
+    mutilations_dir='data/digitized versions/Vies des saints/mutilations/',
+    excisions_dir='data/digitized versions/Vies des saints/excisions/',
     img_size=256
 ):
-    os.makedirs(mutiliations_dir, exist_ok=True)
+    # Create output directories if they don't exist
+    os.makedirs(mutilations_dir, exist_ok=True)
+    os.makedirs(excisions_dir, exist_ok=True)
 
+    # Define transformations
     transform = transforms.Compose([
         transforms.Resize((img_size, img_size)),
         transforms.ToTensor(),
     ])
 
+    # Initialize the dataset
     dataset = ManuscriptDataset(
         image_dir=complete_dir,
         transform=transform,
@@ -98,20 +107,29 @@ def generate_and_save_mutiliations(
 
     total = len(dataset)
     for idx in range(total):
-        masked_img, mask, original_img, img_name = dataset[idx]
+        mutilated_img, excision_img, img_name = dataset[idx]
 
-        # Generate a new filename
+        # Generate filenames for mutilated and excision images
         name, ext = os.path.splitext(img_name)
-        mutiliation_name = f"{name}_mutiliation{ext}"
-        save_path = os.path.join(mutiliations_dir, mutiliation_name)
+        mutilation_name = f"{name}_mutilated{ext}"
+        excision_name = f"{name}_excised{ext}"
 
-        # Save the masked image
-        save_mutiliation(masked_img, save_path)
+        # Define save paths
+        mutilation_save_path = os.path.join(mutilations_dir, mutilation_name)
+        excision_save_path = os.path.join(excisions_dir, excision_name)
 
+        # Save the mutilated image
+        save_image(mutilated_img, mutilation_save_path)
+
+        # Save the excision image
+        save_image(excision_img, excision_save_path)
+
+        # Optional: Print progress every 100 images
         if (idx + 1) % 100 == 0:
             print(f"Processed {idx + 1} / {total} images")
 
-    print(f"All mutiliations have been saved to {mutiliations_dir}")
+    print(f"All mutilated images have been saved to {mutilations_dir}")
+    print(f"All excised images have been saved to {excisions_dir}")
 
 if __name__ == "__main__":
-    generate_and_save_mutiliations()
+    generate_and_save_mutilations()
