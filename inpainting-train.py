@@ -10,6 +10,14 @@ from inpainting_model import UNetInpaint
 from tqdm import tqdm
 from skimage.metrics import peak_signal_noise_ratio as psnr
 from skimage.metrics import structural_similarity as ssim
+import gc
+import torch.cuda
+
+# Add this function
+def clear_gpu_memory():
+    gc.collect()
+    torch.cuda.empty_cache()
+
 
 class ManuscriptInpaintingDataset(Dataset):
     def __init__(self, mutilations_dir, excisions_dir, transform=None):
@@ -96,6 +104,8 @@ def train_model(
     model.to(device)
     
     for epoch in range(num_epochs):
+        clear_gpu_memory()  # Clear memory at start of epoch
+
         # Training Phase
         model.train()
         running_loss = 0.0
@@ -116,6 +126,10 @@ def train_model(
             
             running_loss += loss.item() * inputs.size(0)
             progress_bar.set_postfix({'Loss': loss.item()})
+
+            # Clear memory after each batch
+            del outputs, loss
+            clear_gpu_memory()
         
         epoch_loss = running_loss / len(train_loader.dataset)
         print(f"Epoch [{epoch+1}/{num_epochs}], Training Loss: {epoch_loss:.4f}")
@@ -142,8 +156,21 @@ def train_model(
                 
                 for i in range(outputs_np.shape[0]):
                     # PSNR and SSIM expect HWC and range [0,1]
-                    psnr_val = psnr(targets_np[i].transpose(1, 2, 0), outputs_np[i].transpose(1, 2, 0), data_range=1)
-                    ssim_val = ssim(targets_np[i].transpose(1, 2, 0), outputs_np[i].transpose(1, 2, 0), multichannel=True, data_range=1)
+                    output_img = outputs_np[i].transpose(1, 2, 0)
+                    target_img = targets_np[i].transpose(1, 2, 0)
+                    
+                    # Calculate PSNR
+                    psnr_val = psnr(target_img, output_img, data_range=1)
+                    
+                    # Calculate SSIM with explicit parameters
+                    ssim_val = ssim(
+                        target_img, 
+                        output_img,
+                        win_size=5,  # Smaller window size
+                        channel_axis=2,  # Specify channel axis
+                        data_range=1
+                    )
+                    
                     psnr_total += psnr_val
                     ssim_total += ssim_val
         
@@ -169,7 +196,7 @@ if __name__ == "__main__":
     
     # Hyperparameters
     num_epochs = 50
-    batch_size = 4          # Reduced batch size due to larger image size
+    batch_size = 1          # Reduced batch size due to larger image size
     learning_rate = 1e-4
     img_size = 1000         # Updated image size
     mask_ratio = 0.2        # Should match data_preparation.py
@@ -202,16 +229,16 @@ if __name__ == "__main__":
         train_dataset,
         batch_size=batch_size,
         shuffle=True,
-        num_workers=4,
-        pin_memory=True if device.type == 'cuda' else False
+        num_workers=2,
+        pin_memory=False
     )
     
     val_loader = DataLoader(
         val_dataset,
         batch_size=batch_size,
         shuffle=False,
-        num_workers=4,
-        pin_memory=True if device.type == 'cuda' else False
+        num_workers=2,
+        pin_memory=False
     )
     
     # Initialize the model
