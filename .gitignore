@@ -4,6 +4,12 @@ my_secrets.py
 #source data
 data/
 
+#model stuff
+models/*.pth
+*.pth
+__pycache__/
+*.pyc
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
