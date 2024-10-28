@@ -85,7 +85,7 @@ def train_model(
     device,
     num_epochs=50,
     save_every=10,
-    model_save_path='models/unet_inpaint.pth'
+    checkpoint_dir='models'
 ):
     """
     Trains the model.
@@ -99,9 +99,24 @@ def train_model(
         device: Device to train on ('cuda' or 'cpu').
         num_epochs (int): Number of epochs to train.
         save_every (int): Save the model every 'save_every' epochs.
-        model_save_path (str): Path to save the trained model.
+        checkpoint_dir (str): Directory where to save the trained model.
     """
     model.to(device)
+    start_epoch = 0
+
+    # Look for latest checkpoint
+    checkpoints = [f for f in os.listdir(checkpoint_dir) if f.startswith('unet_inpaint_epoch_')]
+    if checkpoints:
+        # Get the latest checkpoint
+        latest_checkpoint = max(checkpoints, key=lambda x: int(x.split('_')[3].split('.')[0]))
+        checkpoint_path = os.path.join(checkpoint_dir, latest_checkpoint)
+        
+        print(f"Loading checkpoint: {checkpoint_path}")
+        checkpoint = torch.load(checkpoint_path)
+        model.load_state_dict(checkpoint['model_state_dict'])
+        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        start_epoch = checkpoint['epoch'] + 1
+        print(f"Resuming from epoch {start_epoch}")
     
     for epoch in range(num_epochs):
         clear_gpu_memory()  # Clear memory at start of epoch
@@ -179,15 +194,37 @@ def train_model(
         avg_ssim = ssim_total / len(val_loader.dataset)
         print(f"Epoch [{epoch+1}/{num_epochs}], Validation Loss: {val_loss:.4f}, PSNR: {avg_psnr:.2f}, SSIM: {avg_ssim:.4f}")
         
-        # Save the model every 'save_every' epochs
+        # Save checkpoint every 'save_every' epochs
         if (epoch + 1) % save_every == 0:
-            os.makedirs(os.path.dirname(model_save_path), exist_ok=True)
-            torch.save(model.state_dict(), model_save_path)
-            print(f"Model saved to {model_save_path}")
+            checkpoint_path = os.path.join(checkpoint_dir, f'unet_inpaint_epoch_{epoch+1}.pth')
+            os.makedirs(os.path.dirname(checkpoint_path), exist_ok=True)
+            
+            checkpoint = {
+                'epoch': epoch,
+                'model_state_dict': model.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict(),
+                'train_loss': epoch_loss,
+                'val_loss': val_loss,
+                'psnr': avg_psnr,
+                'ssim': avg_ssim
+            }
+            
+            torch.save(checkpoint, checkpoint_path)
+            print(f"Checkpoint saved to {checkpoint_path}")
     
-    # Save the final model
-    torch.save(model.state_dict(), model_save_path)
-    print(f"Final model saved to {model_save_path}")
+    # Save final model
+    final_checkpoint_path = os.path.join(checkpoint_dir, f'unet_inpaint_epoch_{num_epochs}.pth')
+    checkpoint = {
+        'epoch': num_epochs-1,
+        'model_state_dict': model.state_dict(),
+        'optimizer_state_dict': optimizer.state_dict(),
+        'train_loss': epoch_loss,
+        'val_loss': val_loss,
+        'psnr': avg_psnr,
+        'ssim': avg_ssim
+    }
+    torch.save(checkpoint, final_checkpoint_path)
+    print(f"Final checkpoint saved to {final_checkpoint_path}")
 
 if __name__ == "__main__":
     # Paths to directories
@@ -261,5 +298,5 @@ if __name__ == "__main__":
         device=device,
         num_epochs=num_epochs,
         save_every=10,
-        model_save_path='models/unet_inpaint.pth'
+        checkpoint_dir='models'
     )
