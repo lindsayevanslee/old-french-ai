@@ -37,7 +37,7 @@ The model was trained on:
 ### Training Procedure
 
 - **Framework:** PyTorch
-- **Training Duration:** 50 epochs
+- **Training Duration:** 40 epochs
 - **Optimization:** Adam optimizer
 - **Loss Function:** L1 Loss
 - **Evaluation Metrics:** PSNR, SSIM
@@ -46,9 +46,9 @@ The model was trained on:
 ## Performance
 
 The model achieved:
-- PSNR: [your best PSNR value]
-- SSIM: [your best SSIM value]
-- Validation Loss: [your best validation loss]
+- PSNR: 28.35
+- SSIM: 0.9715
+- Validation Loss: 0.0098
 
 ## Usage
 
