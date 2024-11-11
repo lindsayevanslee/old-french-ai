@@ -1,4 +1,5 @@
-from huggingface_hub import hf_hub_download
+from huggingface_hub import hf_hub_download, login
+from getpass import getpass
 import os
 
 def download_model(username, repo_name="old-french-ai"):
@@ -8,12 +9,18 @@ def download_model(username, repo_name="old-french-ai"):
     # Download the model file
     model_path = hf_hub_download(
         repo_id=f"{username}/{repo_name}",
-        filename="unet_inpaint.pth",
+        filename="unet_inpaint_epoch_40.pth",
         local_dir="models"
     )
     
     print(f"Model downloaded to: {model_path}")
 
 if __name__ == "__main__":
-    username = input("Enter Hugging Face username: ")
+    # Login to Hugging Face
+    username = "lindsayevanslee"
+
+    token = getpass("Enter your Hugging Face token: ")  # Get from https://huggingface.co/settings/tokens
+    login(token)
+
+    #Download model
     download_model(username)

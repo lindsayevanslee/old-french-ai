@@ -19,5 +19,6 @@ dependencies:
 
   - pip:
     - pillow-heif==0.16.0
+    - huggingface-hub
 
 prefix: ./envs
