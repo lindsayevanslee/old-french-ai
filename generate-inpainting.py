@@ -1,3 +1,5 @@
+"""Apply inpainting from trained model"""
+
 import torch
 from inpainting_model import UNetInpaint
 from PIL import Image

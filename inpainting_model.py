@@ -1,3 +1,8 @@
+"""
+The script defines a U-Net-based model for image inpainting using PyTorch. The model is designed to restore damaged or missing sections of historical manuscript images. 
+"""
+
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F

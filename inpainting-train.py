@@ -1,3 +1,7 @@
+"""
+This script is designed to train a U-Net-based model for image inpainting using PyTorch.
+"""
+
 import os
 import torch
 import torch.nn as nn
