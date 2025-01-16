@@ -8,152 +8,168 @@ from torchvision import transforms
 import numpy as np
 
 class ManuscriptDataset(Dataset):
-    """Dataset class for medieval manuscript restoration"""
-    def __init__(self, mutilated_dir, excised_dir, transform=None):
-        """
-        Args:
-            mutilated_dir (str): Directory with mutilated images
-            excised_dir (str): Directory with excised portions
-            transform (callable, optional): Optional transform to be applied
-        """
+    def __init__(self, mutilated_dir, excised_dir, device='cuda'):
         self.mutilated_dir = mutilated_dir
         self.excised_dir = excised_dir
-        self.transform = transform
+        self.device = device
         
-        # Get all matching pairs of images
+        # Define image transforms for consistency
+        self.image_transform = transforms.Compose([
+            transforms.Resize(512),  # Stable Diffusion expects 512x512 images
+            transforms.CenterCrop(512),
+            transforms.ToTensor(),
+            transforms.Normalize([0.5], [0.5])  # Scale to [-1, 1]
+        ])
+        
+        # Simple transform for masks
+        self.mask_transform = transforms.Compose([
+            transforms.Resize(512),
+            transforms.CenterCrop(512),
+            transforms.ToTensor()
+        ])
+        
+        # Get image pairs
         self.image_pairs = []
         for filename in os.listdir(mutilated_dir):
-            if filename.endswith('.jpeg'):
+            if filename.endswith(('.jpeg', '.jpg', '.png')):
                 excised_file = filename.replace('mutilated', 'excised')
                 if os.path.exists(os.path.join(excised_dir, excised_file)):
                     self.image_pairs.append((filename, excised_file))
+        
+        print(f"Found {len(self.image_pairs)} image pairs")
 
     def __len__(self):
         return len(self.image_pairs)
 
     def __getitem__(self, idx):
+        # Load images
         mutilated_path = os.path.join(self.mutilated_dir, self.image_pairs[idx][0])
         excised_path = os.path.join(self.excised_dir, self.image_pairs[idx][1])
         
-        # Load images
-        mutilated_image = Image.open(mutilated_path).convert('RGB')
-        excised_image = Image.open(excised_path).convert('RGB')
+        mutilated = Image.open(mutilated_path).convert('RGB')
+        excised = Image.open(excised_path).convert('RGB')
         
-        # Create mask (white where content is missing)
-        mask = create_mask(mutilated_image)
+        # Apply transforms
+        mutilated = self.image_transform(mutilated)
+        excised = self.image_transform(excised)
         
-        if self.transform:
-            mutilated_image = self.transform(mutilated_image)
-            excised_image = self.transform(excised_image)
-            mask = self.transform(mask)
+        # Create binary mask from mutilated image
+        # White (1) in areas to be inpainted, Black (0) elsewhere
+        mask = torch.where(
+            mutilated.mean(dim=0, keepdim=True) > 0.9,  # Threshold for white areas
+            torch.ones(1, 512, 512),
+            torch.zeros(1, 512, 512)
+        )
         
-        return mutilated_image, mask, excised_image
+        return mutilated, mask, excised
 
-def create_mask(image):
-    """Create binary mask indicating missing regions"""
-    # Convert to grayscale and threshold to find very light regions
-    gray = image.convert('L')
-    threshold = 250  # Adjust based on your images
-    mask = gray.point(lambda x: 255 if x > threshold else 0)
-    return mask
-
-def train_inpainting_model(model_path, dataset, num_epochs=10):
+def train_inpainting_model(model_path, dataloader, device='cuda'):
     """Fine-tune the stable diffusion model for manuscript restoration"""
-    # Load pre-trained model
+    print(f"Training on device: {device}")
+    
+    # Initialize model with consistent precision
     pipe = StableDiffusionInpaintPipeline.from_pretrained(
         model_path,
-        torch_dtype=torch.float16
-    ).to("cuda")
+        torch_dtype=torch.float32,  # Use full precision for stability
+        safety_checker=None
+    ).to(device)
+    
+    # Prepare text condition (empty string for unconditional generation)
+    uncond_tokens = pipe.tokenizer(
+        [""],
+        padding="max_length",
+        max_length=pipe.tokenizer.model_max_length,
+        truncation=True,
+        return_tensors="pt"
+    ).input_ids.to(device)
+    
+    uncond_embeddings = pipe.text_encoder(uncond_tokens)[0]
     
     # Training configuration
     optimizer = torch.optim.AdamW(pipe.unet.parameters(), lr=1e-5)
     
-    for epoch in range(num_epochs):
-        for batch_idx, (mutilated, mask, target) in enumerate(dataset):
-            # Move to GPU
-            mutilated = mutilated.to("cuda")
-            mask = mask.to("cuda")
-            target = target.to("cuda")
+    for epoch in range(10):
+        print(f"Starting epoch {epoch + 1}/10")
+        for batch_idx, (image, mask, target) in enumerate(dataloader):
+            # Move batch to device
+            image = image.to(device)
+            mask = mask.to(device)
+            target = target.to(device)
             
-            # Generate inpainted image
+            # Sample timesteps uniformly
+            timesteps = torch.randint(
+                0,
+                pipe.scheduler.config.num_train_timesteps,
+                (image.shape[0],),
+                device=device
+            ).long()
+            
+            # Prepare latent variables
             with torch.no_grad():
-                noise = torch.randn_like(mutilated)
-                timesteps = torch.randint(0, pipe.scheduler.num_train_timesteps, (mutilated.shape[0],))
-                noisy_images = pipe.scheduler.add_noise(mutilated, noise, timesteps)
+                # Convert images to latent space
+                latents = pipe.vae.encode(image).latent_dist.sample()
+                latents = 0.18215 * latents  # Scale factor from VAE
+                
+                # Add noise to latents
+                noise = torch.randn_like(latents)
+                noisy_latents = pipe.scheduler.add_noise(latents, noise, timesteps)
+                
+                # Prepare masked image embeddings
+                masked_image = image * (1 - mask)
+                masked_image_latents = pipe.vae.encode(masked_image).latent_dist.sample() * 0.18215
+                
+                # Resize mask to match latent space dimensions
+                mask = torch.nn.functional.interpolate(
+                    mask,
+                    size=latents.shape[-2:],
+                    mode='nearest'
+                )
             
-            # Forward pass
-            noise_pred = pipe.unet(noisy_images, timesteps, encoder_hidden_states=None)["sample"]
+            # Prepare UNet input by concatenating all components
+            model_input = torch.cat([noisy_latents, mask, masked_image_latents], dim=1)
+            
+            # Get UNet prediction
+            noise_pred = pipe.unet(
+                model_input,
+                timesteps,
+                encoder_hidden_states=uncond_embeddings
+            ).sample
             
             # Calculate loss
             loss = nn.MSELoss()(noise_pred, noise)
             
-            # Backward pass and optimization
+            # Optimization step
+            optimizer.zero_grad()
             loss.backward()
             optimizer.step()
-            optimizer.zero_grad()
             
+            if batch_idx % 10 == 0:
+                print(f"Epoch {epoch + 1}, Batch {batch_idx}, Loss: {loss.item():.4f}")
+            
+            # Memory management
             if batch_idx % 100 == 0:
-                print(f"Epoch {epoch}, Batch {batch_idx}, Loss: {loss.item():.4f}")
+                torch.cuda.empty_cache()
     
     return pipe
 
-def test_model(pipe, test_image_path, save_path="restored_output.png"):
-    """Test the model on a single image and save the result"""
-    # Load and preprocess test image
-    test_image = Image.open(test_image_path).convert('RGB')
-    mask = create_mask(test_image)
-    
-    # Prepare images for the model
-    test_image = transforms.Resize((512, 512))(test_image)
-    mask = transforms.Resize((512, 512))(mask)
-    
-    # Generate the inpainted image
-    with torch.no_grad():
-        output = pipe(
-            image=test_image,
-            mask_image=mask,
-            guidance_scale=7.5,
-            num_inference_steps=50
-        ).images[0]
-    
-    # Save the result
-    output.save(save_path)
-    
-    # Create a side-by-side comparison
-    comparison = Image.new('RGB', (test_image.width * 3, test_image.height))
-    comparison.paste(test_image, (0, 0))
-    comparison.paste(mask, (test_image.width, 0))
-    comparison.paste(output, (test_image.width * 2, 0))
-    comparison.save('comparison_' + save_path)
-    
-    return output
-
 def main():
-    # Directory paths
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    print(f"Using device: {device}")
+    
+    # Define paths
     mutilated_dir = "data/digitized versions/Vies des saints/mutilations/"
     excised_dir = "data/digitized versions/Vies des saints/excisions/"
     
-    # Set up data transformations
-    transform = transforms.Compose([
-        transforms.Resize((512, 512)),  # SD typically expects 512x512
-        transforms.ToTensor(),
-        transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
-    ])
-    
     # Create dataset and dataloader
-    dataset = ManuscriptDataset(mutilated_dir, excised_dir, transform=transform)
-    dataloader = DataLoader(dataset, batch_size=4, shuffle=True)
+    dataset = ManuscriptDataset(mutilated_dir, excised_dir, device=device)
+    dataloader = DataLoader(dataset, batch_size=1, shuffle=True)  # Use batch size of 1 for stability
     
     # Train model
-    model_path = "runwayml/stable-diffusion-inpainting"  # or another suitable pre-trained model
-    trained_pipe = train_inpainting_model(model_path, dataloader)
+    model_path = "runwayml/stable-diffusion-inpainting"
+    trained_pipe = train_inpainting_model(model_path, dataloader, device=device)
     
-    # Save the fine-tuned model
+    # Save the trained model
     trained_pipe.save_pretrained("manuscript_restoration_model")
-    
-    # Test the model on a sample image
-    test_image_path = os.path.join(mutilated_dir, "page_11_mutilated.jpeg")
-    test_model(trained_pipe, test_image_path)
 
 if __name__ == "__main__":
     main()
