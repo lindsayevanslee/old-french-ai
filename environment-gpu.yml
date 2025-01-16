@@ -18,6 +18,9 @@ dependencies:
   - pytorch=2.4.0
   - torchvision=0.19.1
   - scikit-image=0.24.0
+  - diffusers=0.32.1
+  - transformers=4.48.0
+  - accelerate=1.2.1
   - pip:
     - pillow-heif==0.16.0
     - huggingface_hub
