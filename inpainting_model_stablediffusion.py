@@ -1,34 +1,45 @@
 import torch
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
-from diffusers import StableDiffusionInpaintPipeline
+from diffusers import StableDiffusionInpaintPipeline, DDPMScheduler
 from PIL import Image
 import os
 from torchvision import transforms
-import numpy as np
+
+##########################
+# Example Mask Generation
+##########################
+def generate_mask_threshold(mutilated_tensor, threshold=0.9):
+    """
+    Expects a 3D tensor: CxHxW with values in [-1,1].
+    We'll convert that range to [0,1] for thresholding.
+    Returns a 2D mask [1, H, W] with 1 where area is "white," else 0.
+    """
+    # Convert from [-1,1] to [0,1]
+    tensor_01 = (mutilated_tensor * 0.5) + 0.5
+    mean_vals = tensor_01.mean(dim=0, keepdim=True)
+    mask = torch.where(mean_vals > threshold, 1.0, 0.0)
+    return mask
 
 class ManuscriptDataset(Dataset):
-    def __init__(self, mutilated_dir, excised_dir, device='cuda'):
+    def __init__(self,
+                 mutilated_dir,
+                 excised_dir,
+                 device='cuda'):
         self.mutilated_dir = mutilated_dir
         self.excised_dir = excised_dir
         self.device = device
         
-        # Define image transforms for consistency
+        # Image transform: downsize to 512×512, normalize to [-1,1]
         self.image_transform = transforms.Compose([
-            transforms.Resize(512),  # Stable Diffusion expects 512x512 images
-            transforms.CenterCrop(512),
-            transforms.ToTensor(),
-            transforms.Normalize([0.5], [0.5])  # Scale to [-1, 1]
-        ])
-        
-        # Simple transform for masks
-        self.mask_transform = transforms.Compose([
             transforms.Resize(512),
             transforms.CenterCrop(512),
-            transforms.ToTensor()
+            transforms.ToTensor(),
+            transforms.Normalize([0.5, 0.5, 0.5],
+                                 [0.5, 0.5, 0.5])
         ])
-        
-        # Get image pairs
+
+        # Gather image pairs
         self.image_pairs = []
         for filename in os.listdir(mutilated_dir):
             if filename.endswith(('.jpeg', '.jpg', '.png')):
@@ -36,140 +47,198 @@ class ManuscriptDataset(Dataset):
                 if os.path.exists(os.path.join(excised_dir, excised_file)):
                     self.image_pairs.append((filename, excised_file))
         
-        print(f"Found {len(self.image_pairs)} image pairs")
+        print(f"Found {len(self.image_pairs)} image pairs in dataset.")
 
     def __len__(self):
         return len(self.image_pairs)
 
     def __getitem__(self, idx):
-        # Load images
         mutilated_path = os.path.join(self.mutilated_dir, self.image_pairs[idx][0])
-        excised_path = os.path.join(self.excised_dir, self.image_pairs[idx][1])
+        excised_path   = os.path.join(self.excised_dir, self.image_pairs[idx][1])
         
+        # Load images
         mutilated = Image.open(mutilated_path).convert('RGB')
-        excised = Image.open(excised_path).convert('RGB')
+        excised   = Image.open(excised_path).convert('RGB')
         
-        # Apply transforms
-        mutilated = self.image_transform(mutilated)
-        excised = self.image_transform(excised)
+        # Transforms
+        mutilated_t = self.image_transform(mutilated)
+        excised_t   = self.image_transform(excised)
         
-        # Create binary mask from mutilated image
-        # White (1) in areas to be inpainted, Black (0) elsewhere
-        mask = torch.where(
-            mutilated.mean(dim=0, keepdim=True) > 0.9,  # Threshold for white areas
-            torch.ones(1, 512, 512),
-            torch.zeros(1, 512, 512)
-        )
+        # Example: threshold-based mask
+        mask_t = generate_mask_threshold(mutilated_t, threshold=0.9)
         
-        return mutilated, mask, excised
+        # Return all three. We only train using the mutilated image & mask,
+        # but we might want the excised for debugging/inspection.
+        return mutilated_t, mask_t, excised_t
 
 def train_inpainting_model(model_path, dataloader, device='cuda'):
-    """Fine-tune the stable diffusion model for manuscript restoration"""
+    """Fine-tune the stable diffusion inpainting model with 
+       VAE and text encoder frozen, in half-precision, 
+       using gradient checkpointing & attention slicing."""
     print(f"Training on device: {device}")
-    
-    # Initialize model with consistent precision
+
+    ############################################################################
+    # 1) Load pipeline in half precision. Then freeze text encoder + VAE.
+    ############################################################################
     pipe = StableDiffusionInpaintPipeline.from_pretrained(
         model_path,
-        torch_dtype=torch.float32,  # Use full precision for stability
+        torch_dtype=torch.float16,  # half precision
         safety_checker=None
-    ).to(device)
+    )
+    pipe.to(device)
     
-    # Prepare text condition (empty string for unconditional generation)
-    uncond_tokens = pipe.tokenizer(
-        [""],
-        padding="max_length",
-        max_length=pipe.tokenizer.model_max_length,
-        truncation=True,
-        return_tensors="pt"
-    ).input_ids.to(device)
+    # Freeze text encoder + VAE (no gradient needed)
+    pipe.text_encoder.eval()
+    for param in pipe.text_encoder.parameters():
+        param.requires_grad = False
     
-    uncond_embeddings = pipe.text_encoder(uncond_tokens)[0]
+    pipe.vae.eval()
+    for param in pipe.vae.parameters():
+        param.requires_grad = False
     
-    # Training configuration
+    # Ensure the UNet is in train mode
+    pipe.unet.train()
+
+    # Enable memory-saving features
+    pipe.unet.enable_gradient_checkpointing()
+    pipe.enable_attention_slicing()
+
+    # Optionally use a simpler scheduler with fewer steps
+    pipe.scheduler = DDPMScheduler(
+        num_train_timesteps=250,  # fewer steps -> less memory/time
+        beta_start=0.0001,
+        beta_end=0.02,
+        beta_schedule="linear"
+    )
+
+    ############################################################################
+    # 2) Precompute unconditional text embedding (we won't train text encoder)
+    ############################################################################
+    with torch.no_grad():
+        uncond_tokens = pipe.tokenizer(
+            [""],  # empty prompt
+            padding="max_length",
+            max_length=pipe.tokenizer.model_max_length,
+            truncation=True,
+            return_tensors="pt"
+        ).input_ids.to(device)
+        uncond_embeddings = pipe.text_encoder(uncond_tokens)[0]
+        # Just in case, detach (not strictly needed if text encoder is eval/frozen):
+        uncond_embeddings = uncond_embeddings.detach()
+
+    ############################################################################
+    # 3) Set up optimizer (training only the UNet)
+    ############################################################################
     optimizer = torch.optim.AdamW(pipe.unet.parameters(), lr=1e-5)
-    
-    for epoch in range(10):
-        print(f"Starting epoch {epoch + 1}/10")
-        for batch_idx, (image, mask, target) in enumerate(dataloader):
-            # Move batch to device
-            image = image.to(device)
-            mask = mask.to(device)
-            target = target.to(device)
-            
-            # Sample timesteps uniformly
-            timesteps = torch.randint(
-                0,
-                pipe.scheduler.config.num_train_timesteps,
-                (image.shape[0],),
-                device=device
-            ).long()
-            
-            # Prepare latent variables
+
+    # Scale factor from the original stable diffusion config
+    vae_scaling_factor = 0.18215
+
+    ############################################################################
+    # 4) Training loop
+    ############################################################################
+    num_epochs = 10
+    for epoch in range(num_epochs):
+        print(f"Starting epoch {epoch + 1}/{num_epochs}")
+
+        for batch_idx, (image, mask, excised) in enumerate(dataloader):
+            # Move data to GPU in half precision
+            image = image.half().to(device)
+            mask  = mask.half().to(device)
+
+            # ---------------------------------------------------
+            # 4A) Convert images to latents with VAE, no grad
+            # ---------------------------------------------------
             with torch.no_grad():
-                # Convert images to latent space
                 latents = pipe.vae.encode(image).latent_dist.sample()
-                latents = 0.18215 * latents  # Scale factor from VAE
-                
-                # Add noise to latents
+                latents = latents * vae_scaling_factor
+                # Detach from the graph because VAE is frozen
+                latents = latents.detach()
+
+                # Generate random noise
                 noise = torch.randn_like(latents)
+
+                # Pick random timesteps
+                timesteps = torch.randint(
+                    0, pipe.scheduler.config.num_train_timesteps,
+                    (latents.shape[0],),
+                    device=device
+                ).long()
+
+                # Add noise to latents
                 noisy_latents = pipe.scheduler.add_noise(latents, noise, timesteps)
-                
-                # Prepare masked image embeddings
+                noisy_latents = noisy_latents.detach()
+
+                # Compute masked image latents
                 masked_image = image * (1 - mask)
-                masked_image_latents = pipe.vae.encode(masked_image).latent_dist.sample() * 0.18215
-                
-                # Resize mask to match latent space dimensions
-                mask = torch.nn.functional.interpolate(
-                    mask,
-                    size=latents.shape[-2:],
-                    mode='nearest'
+                masked_image_latents = pipe.vae.encode(masked_image).latent_dist.sample()
+                masked_image_latents = masked_image_latents * vae_scaling_factor
+                masked_image_latents = masked_image_latents.detach()
+
+                # Resize mask to match the latent resolution
+                mask_resized = torch.nn.functional.interpolate(
+                    mask, size=latents.shape[-2:], mode='nearest'
                 )
-            
-            # Prepare UNet input by concatenating all components
-            model_input = torch.cat([noisy_latents, mask, masked_image_latents], dim=1)
-            
-            # Get UNet prediction
+                mask_resized = mask_resized.detach()
+
+            # ---------------------------------------------------
+            # 4B) Forward pass in UNet (the only part we train)
+            # ---------------------------------------------------
+            # Input for inpainting typically concatenates [noisy_latents, mask, masked_image_latents]
+            model_input = torch.cat([noisy_latents, mask_resized, masked_image_latents], dim=1)
+
+            # The UNet forward pass
             noise_pred = pipe.unet(
                 model_input,
                 timesteps,
                 encoder_hidden_states=uncond_embeddings
-            ).sample
-            
-            # Calculate loss
+            ).sample  # shape [B, 4, H, W] typically
+
+            # ---------------------------------------------------
+            # 4C) Compute loss: MSE between predicted noise and actual noise
+            # ---------------------------------------------------
             loss = nn.MSELoss()(noise_pred, noise)
-            
-            # Optimization step
+
+            # ---------------------------------------------------
+            # 4D) Backprop + step
+            # ---------------------------------------------------
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
-            
+
+            # Logging
             if batch_idx % 10 == 0:
-                print(f"Epoch {epoch + 1}, Batch {batch_idx}, Loss: {loss.item():.4f}")
-            
-            # Memory management
+                print(f"Epoch {epoch+1}, Batch {batch_idx}, Loss: {loss.item():.4f}")
+
+            # Clean up GPU mem occasionally
             if batch_idx % 100 == 0:
                 torch.cuda.empty_cache()
-    
+
     return pipe
 
 def main():
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     print(f"Using device: {device}")
-    
+
     # Define paths
     mutilated_dir = "data/digitized versions/Vies des saints/mutilations/"
-    excised_dir = "data/digitized versions/Vies des saints/excisions/"
-    
+    excised_dir   = "data/digitized versions/Vies des saints/excisions/"
+
     # Create dataset and dataloader
-    dataset = ManuscriptDataset(mutilated_dir, excised_dir, device=device)
-    dataloader = DataLoader(dataset, batch_size=1, shuffle=True)  # Use batch size of 1 for stability
-    
+    dataset = ManuscriptDataset(
+        mutilated_dir=mutilated_dir,
+        excised_dir=excised_dir,
+        device=device
+    )
+    dataloader = DataLoader(dataset, batch_size=1, shuffle=True)
+
     # Train model
     model_path = "runwayml/stable-diffusion-inpainting"
     trained_pipe = train_inpainting_model(model_path, dataloader, device=device)
-    
+
     # Save the trained model
     trained_pipe.save_pretrained("manuscript_restoration_model")
+    print("Done! Model saved to 'manuscript_restoration_model'")
 
 if __name__ == "__main__":
     main()
