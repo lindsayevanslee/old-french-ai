@@ -1,5 +1,6 @@
 """
-This script is designed to train a U-Net-based model for image inpainting using PyTorch.
+Training script for manuscript inpainting model that utilizes pre-computed masks
+and implements advanced training procedures with comprehensive metrics.
 """
 
 import os
@@ -10,75 +11,108 @@ from torch.utils.data import Dataset, DataLoader, random_split
 from torchvision import transforms
 from PIL import Image
 import numpy as np
+from pathlib import Path
 from inpainting_model import UNetInpaint
 from tqdm import tqdm
 from skimage.metrics import peak_signal_noise_ratio as psnr
 from skimage.metrics import structural_similarity as ssim
 import gc
 import torch.cuda
+import logging
+from datetime import datetime
 
-# Add this function
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler(f'training_{datetime.now().strftime("%Y%m%d_%H%M%S")}.log'),
+        logging.StreamHandler()
+    ]
+)
+
 def clear_gpu_memory():
+    """Clear GPU memory to prevent OOM errors."""
     gc.collect()
     torch.cuda.empty_cache()
 
-
 class ManuscriptInpaintingDataset(Dataset):
-    def __init__(self, mutilations_dir, excisions_dir, transform=None):
-        """
-        Args:
-            mutilations_dir (str): Directory with mutilated (mutilationed) images.
-            excisions_dir (str): Directory with excised (removed) images.
-            transform (callable, optional): Optional transform to be applied on a sample.
-        """
-        self.mutilations_dir = mutilations_dir
-        self.excisions_dir = excisions_dir
+    """Dataset class for loading manuscript images with pre-computed masks."""
+    def __init__(self, mutilations_dir, excisions_dir, masks_dir, transform=None):
+        self.mutilations_dir = Path(mutilations_dir)
+        self.excisions_dir = Path(excisions_dir)
+        self.masks_dir = Path(masks_dir)
         self.transform = transform
         
-        # List of mutilated image filenames
-        self.mutilation_filenames = [
-            fname for fname in os.listdir(mutilations_dir)
-            if fname.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp'))
+        # Get all mutilated image files
+        self.image_files = [
+            f for f in self.mutilations_dir.glob("*.jpeg")
+            if f.stem.endswith('_mutilated')
         ]
         
-        # Ensure that for each mutilation, there's a corresponding excision
-        self.mutilation_filenames = [
-            fname for fname in self.mutilation_filenames
-            if os.path.exists(os.path.join(excisions_dir, fname.replace('_mutilated', '_excised')))
+        # Verify matching files exist
+        self.image_files = [
+            f for f in self.image_files
+            if self._has_matching_files(f)
         ]
         
+        logging.info(f"Found {len(self.image_files)} valid image sets")
+        
+    def _has_matching_files(self, mutilated_file):
+        """Check if all required matching files exist."""
+        base_name = mutilated_file.stem.replace('_mutilated', '')
+        excised_file = self.excisions_dir / f"{base_name}_excised.jpeg"
+        mask_file = self.masks_dir / f"{base_name}_mask.jpeg"
+        return excised_file.exists() and mask_file.exists()
+    
     def __len__(self):
-        return len(self.mutilation_filenames)
+        return len(self.image_files)
     
     def __getitem__(self, idx):
-        mutilation_name = self.mutilation_filenames[idx]
-        excision_name = mutilation_name.replace('_mutilated', '_excised')
-        
-        mutilation_path = os.path.join(self.mutilations_dir, mutilation_name)
-        excision_path = os.path.join(self.excisions_dir, excision_name)
+        # Get file paths
+        mutilated_path = self.image_files[idx]
+        base_name = mutilated_path.stem.replace('_mutilated', '')
+        excised_path = self.excisions_dir / f"{base_name}_excised.jpeg"
+        mask_path = self.masks_dir / f"{base_name}_mask.jpeg"
         
         # Load images
-        mutilation_image = Image.open(mutilation_path).convert('RGB')
-        excision_image = Image.open(excision_path).convert('RGB')
+        mutilated_img = Image.open(mutilated_path).convert('RGB')
+        excised_img = Image.open(excised_path).convert('RGB')
+        mask_img = Image.open(mask_path).convert('L')  # Load as grayscale
         
+        # Apply transformations
         if self.transform:
-            mutilation_image = self.transform(mutilation_image)
-            excision_image = self.transform(excision_image)
+            mutilated_img = self.transform(mutilated_img)
+            excised_img = self.transform(excised_img)
+            mask_img = self.transform(mask_img)
         
-        # Create mask from excision image
-        # Assuming excision_image has zeros where no excision and non-zeros where excision
-        # Convert to grayscale and threshold
-        excision_gray = excision_image.mean(dim=0)  # [H, W]
-        mask = (excision_gray > 0).float().unsqueeze(0)  # [1, H, W]
+        # Ensure mask is binary
+        mask_img = (mask_img > 0.5).float()
         
-        # Input is mutilated image + mask
-        input_image = torch.cat([mutilation_image, mask], dim=0)  # [4, H, W]
+        # Combine mutilated image and mask
+        input_tensor = torch.cat([mutilated_img, mask_img], dim=0)
         
-        # Target is original image: mutilation + excision
-        target_image = mutilation_image + excision_image  # [3, H, W]
-        target_image = torch.clamp(target_image, 0, 1)  # Ensure pixel values are in [0,1]
+        # Target is the excised content
+        target_tensor = excised_img
         
-        return input_image, target_image
+        return input_tensor, target_tensor, mask_img
+
+class InpaintingLoss(nn.Module):
+    """Custom loss function combining L1 loss with perceptual mask-weighted loss."""
+    def __init__(self, alpha=0.7):
+        super(InpaintingLoss, self).__init__()
+        self.l1 = nn.L1Loss()
+        self.alpha = alpha
+        
+    def forward(self, pred, target, mask):
+        # Regular L1 loss
+        l1_loss = self.l1(pred, target)
+        
+        # Masked L1 loss (focusing on inpainting region)
+        masked_loss = self.l1(pred * mask, target * mask)
+        
+        # Combine losses
+        return self.alpha * masked_loss + (1 - self.alpha) * l1_loss
 
 def train_model(
     model,
@@ -88,190 +122,205 @@ def train_model(
     optimizer,
     device,
     num_epochs=50,
-    save_every=10,
-    checkpoint_dir='models'
+    save_every=5,
+    checkpoint_dir='checkpoints'
 ):
     """
-    Trains the model.
-    
-    Args:
-        model (nn.Module): The neural network model.
-        train_loader (DataLoader): DataLoader for training data.
-        val_loader (DataLoader): DataLoader for validation data.
-        criterion: Loss function.
-        optimizer: Optimizer.
-        device: Device to train on ('cuda' or 'cpu').
-        num_epochs (int): Number of epochs to train.
-        save_every (int): Save the model every 'save_every' epochs.
-        checkpoint_dir (str): Directory where to save the trained model.
+    Train the inpainting model with comprehensive logging and validation.
     """
     model.to(device)
     start_epoch = 0
-
+    best_val_loss = float('inf')
+    
+    # Create checkpoint directory
+    os.makedirs(checkpoint_dir, exist_ok=True)
+    
     # Look for latest checkpoint
-    checkpoints = [f for f in os.listdir(checkpoint_dir) if f.startswith('unet_inpaint_epoch_')]
+    checkpoints = list(Path(checkpoint_dir).glob('unet_inpaint_epoch_*.pth'))
     if checkpoints:
-        # Get the latest checkpoint
-        latest_checkpoint = max(checkpoints, key=lambda x: int(x.split('_')[3].split('.')[0]))
-        checkpoint_path = os.path.join(checkpoint_dir, latest_checkpoint)
-        
-        print(f"Loading checkpoint: {checkpoint_path}")
-        checkpoint = torch.load(checkpoint_path)
+        latest_checkpoint = max(checkpoints, key=lambda x: int(x.stem.split('_')[3]))
+        checkpoint = torch.load(latest_checkpoint)
         model.load_state_dict(checkpoint['model_state_dict'])
         optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         start_epoch = checkpoint['epoch'] + 1
-        print(f"Resuming from epoch {start_epoch}")
+        best_val_loss = checkpoint['best_val_loss']
+        logging.info(f"Resumed from epoch {start_epoch}")
     
-    for epoch in range(num_epochs):
-        clear_gpu_memory()  # Clear memory at start of epoch
-
-        # Training Phase
+    for epoch in range(start_epoch, num_epochs):
+        clear_gpu_memory()
         model.train()
-        running_loss = 0.0
-        progress_bar = tqdm(train_loader, desc=f"Epoch [{epoch+1}/{num_epochs}] (Train)")
+        epoch_loss = 0
         
-        for inputs, targets in progress_bar:
-            inputs = inputs.to(device)    # [B, 4, H, W]
-            targets = targets.to(device)  # [B, 3, H, W]
+        # Training loop
+        progress_bar = tqdm(train_loader, desc=f"Epoch {epoch+1}/{num_epochs} (Train)")
+        for batch_idx, (inputs, targets, masks) in enumerate(progress_bar):
+            inputs = inputs.to(device)
+            targets = targets.to(device)
+            masks = masks.to(device)
             
-            # Forward pass
-            outputs = model(inputs)       # [B, 3, H, W]
-            loss = criterion(outputs, targets)
-            
-            # Backward and optimize
             optimizer.zero_grad()
+            outputs = model(inputs)
+            loss = criterion(outputs, targets, masks)
+            
             loss.backward()
             optimizer.step()
             
-            running_loss += loss.item() * inputs.size(0)
+            epoch_loss += loss.item()
             progress_bar.set_postfix({'Loss': loss.item()})
-
-            # Clear memory after each batch
+            
+            # Clear batch from GPU
             del outputs, loss
             clear_gpu_memory()
         
-        epoch_loss = running_loss / len(train_loader.dataset)
-        print(f"Epoch [{epoch+1}/{num_epochs}], Training Loss: {epoch_loss:.4f}")
-        
-        # Validation Phase
+        avg_train_loss = epoch_loss / len(train_loader)
+
+
+        # Validation phase
         model.eval()
-        val_running_loss = 0.0
-        psnr_total = 0.0
-        ssim_total = 0.0
+        val_loss = 0
+        val_metrics = {'psnr': 0, 'ssim': 0, 'masked_psnr': 0, 'masked_ssim': 0}
+        num_val_samples = 0
         
         with torch.no_grad():
-            for inputs, targets in tqdm(val_loader, desc=f"Epoch [{epoch+1}/{num_epochs}] (Val)"):
+            for inputs, targets, masks in tqdm(val_loader, desc=f"Epoch {epoch+1}/{num_epochs} (Val)"):
                 inputs = inputs.to(device)
                 targets = targets.to(device)
+                masks = masks.to(device)
                 
                 outputs = model(inputs)
-                loss = criterion(outputs, targets)
+                loss = criterion(outputs, targets, masks)
+                val_loss += loss.item()
                 
-                val_running_loss += loss.item() * inputs.size(0)
-                
-                # Convert tensors to numpy arrays for metric calculation
+                # Calculate metrics
                 outputs_np = outputs.cpu().numpy()
                 targets_np = targets.cpu().numpy()
+                masks_np = masks.cpu().numpy()
                 
                 for i in range(outputs_np.shape[0]):
-                    # PSNR and SSIM expect HWC and range [0,1]
-                    output_img = outputs_np[i].transpose(1, 2, 0)
-                    target_img = targets_np[i].transpose(1, 2, 0)
+                    # Convert to correct format for metrics (HWC)
+                    output_img = np.transpose(outputs_np[i], (1, 2, 0))
+                    target_img = np.transpose(targets_np[i], (1, 2, 0))
+                    mask_img = np.transpose(masks_np[i], (1, 2, 0))
                     
-                    # Calculate PSNR
-                    psnr_val = psnr(target_img, output_img, data_range=1)
-                    
-                    # Calculate SSIM with explicit parameters
-                    ssim_val = ssim(
+                    # Calculate metrics for full image
+                    val_metrics['psnr'] += psnr(target_img, output_img, data_range=1.0)
+                    val_metrics['ssim'] += ssim(
                         target_img, 
                         output_img,
-                        win_size=5,  # Smaller window size
-                        channel_axis=2,  # Specify channel axis
-                        data_range=1
+                        multichannel=True,
+                        data_range=1.0
                     )
                     
-                    psnr_total += psnr_val
-                    ssim_total += ssim_val
+                    # Calculate metrics for masked region only
+                    masked_output = output_img * mask_img
+                    masked_target = target_img * mask_img
+                    val_metrics['masked_psnr'] += psnr(masked_target, masked_output, data_range=1.0)
+                    val_metrics['masked_ssim'] += ssim(
+                        masked_target,
+                        masked_output,
+                        multichannel=True,
+                        data_range=1.0
+                    )
+                    
+                num_val_samples += outputs_np.shape[0]
+                
+                # Clear batch from GPU
+                del outputs, loss
+                clear_gpu_memory()
         
-        val_loss = val_running_loss / len(val_loader.dataset)
-        avg_psnr = psnr_total / len(val_loader.dataset)
-        avg_ssim = ssim_total / len(val_loader.dataset)
-        print(f"Epoch [{epoch+1}/{num_epochs}], Validation Loss: {val_loss:.4f}, PSNR: {avg_psnr:.2f}, SSIM: {avg_ssim:.4f}")
+        # Calculate average metrics
+        avg_val_loss = val_loss / len(val_loader)
+        for metric in val_metrics:
+            val_metrics[metric] /= num_val_samples
         
-        # Save checkpoint every 'save_every' epochs
-        if (epoch + 1) % save_every == 0:
-            checkpoint_path = os.path.join(checkpoint_dir, f'unet_inpaint_epoch_{epoch+1}.pth')
-            os.makedirs(os.path.dirname(checkpoint_path), exist_ok=True)
-            
-            checkpoint = {
+        # Log metrics
+        logging.info(f"""Epoch {epoch+1}/{num_epochs}:
+            Train Loss: {avg_train_loss:.4f}
+            Val Loss: {avg_val_loss:.4f}
+            PSNR: {val_metrics['psnr']:.2f}
+            SSIM: {val_metrics['ssim']:.4f}
+            Masked PSNR: {val_metrics['masked_psnr']:.2f}
+            Masked SSIM: {val_metrics['masked_ssim']:.4f}
+        """)
+        
+        # Save checkpoint if validation loss improved
+        if avg_val_loss < best_val_loss:
+            best_val_loss = avg_val_loss
+            checkpoint_path = os.path.join(checkpoint_dir, f'unet_inpaint_best.pth')
+            torch.save({
                 'epoch': epoch,
                 'model_state_dict': model.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
-                'train_loss': epoch_loss,
-                'val_loss': val_loss,
-                'psnr': avg_psnr,
-                'ssim': avg_ssim
-            }
-            
-            torch.save(checkpoint, checkpoint_path)
-            print(f"Checkpoint saved to {checkpoint_path}")
-    
-    # Save final model
-    final_checkpoint_path = os.path.join(checkpoint_dir, f'unet_inpaint_epoch_{num_epochs}.pth')
-    checkpoint = {
-        'epoch': num_epochs-1,
-        'model_state_dict': model.state_dict(),
-        'optimizer_state_dict': optimizer.state_dict(),
-        'train_loss': epoch_loss,
-        'val_loss': val_loss,
-        'psnr': avg_psnr,
-        'ssim': avg_ssim
-    }
-    torch.save(checkpoint, final_checkpoint_path)
-    print(f"Final checkpoint saved to {final_checkpoint_path}")
+                'best_val_loss': best_val_loss,
+                'train_loss': avg_train_loss,
+                'val_loss': avg_val_loss,
+                'metrics': val_metrics
+            }, checkpoint_path)
+            logging.info(f"Saved best model checkpoint to {checkpoint_path}")
+        
+        # Save periodic checkpoint
+        if (epoch + 1) % save_every == 0:
+            checkpoint_path = os.path.join(
+                checkpoint_dir, 
+                f'unet_inpaint_epoch_{epoch+1}.pth'
+            )
+            torch.save({
+                'epoch': epoch,
+                'model_state_dict': model.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict(),
+                'best_val_loss': best_val_loss,
+                'train_loss': avg_train_loss,
+                'val_loss': avg_val_loss,
+                'metrics': val_metrics
+            }, checkpoint_path)
+            logging.info(f"Saved checkpoint to {checkpoint_path}")
 
-if __name__ == "__main__":
-    # Paths to directories
+def main():
+    # Paths
     mutilations_dir = 'data/digitized versions/Vies des saints/mutilations/'
     excisions_dir = 'data/digitized versions/Vies des saints/excisions/'
+    masks_dir = 'data/digitized versions/Vies des saints/masks/'
+    checkpoint_dir = 'checkpoints'
     
-    # Hyperparameters
+    # Training parameters
+    batch_size = 1  # Keep batch size small due to image size
     num_epochs = 50
-    batch_size = 1          # Reduced batch size due to larger image size
     learning_rate = 1e-4
-    img_size = 1000         # Updated image size
-    mask_ratio = 0.2        # Should match data_preparation.py
+    img_size = 1000
     
-    # Device configuration
+    # Set device
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    print(f"Using device: {device}")
+    logging.info(f"Using device: {device}")
     
-    # Data transformations
+    # Data transforms
     transform = transforms.Compose([
         transforms.Resize((img_size, img_size)),
         transforms.ToTensor(),
     ])
     
-    # Initialize Dataset
+    # Create dataset
     dataset = ManuscriptInpaintingDataset(
         mutilations_dir=mutilations_dir,
         excisions_dir=excisions_dir,
+        masks_dir=masks_dir,
         transform=transform
     )
     
-    # Split dataset into training and validation (e.g., 80% train, 20% val)
-    total_size = len(dataset)
-    val_size = int(0.2 * total_size)
-    train_size = total_size - val_size
-    train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
+    # Split dataset
+    train_size = int(0.8 * len(dataset))
+    val_size = len(dataset) - train_size
+    train_dataset, val_dataset = random_split(
+        dataset, 
+        [train_size, val_size]
+    )
     
-    # Initialize DataLoaders
+    # Create data loaders
     train_loader = DataLoader(
         train_dataset,
         batch_size=batch_size,
         shuffle=True,
         num_workers=2,
-        pin_memory=False
+        pin_memory=True
     )
     
     val_loader = DataLoader(
@@ -279,20 +328,18 @@ if __name__ == "__main__":
         batch_size=batch_size,
         shuffle=False,
         num_workers=2,
-        pin_memory=False
+        pin_memory=True
     )
     
-    # Initialize the model
+    # Initialize model, loss, and optimizer
     model = UNetInpaint(in_channels=4, out_channels=3)
-    
-    # Define Loss and Optimizer
-    criterion = nn.L1Loss()  # L1 Loss is effective for image inpainting
+    criterion = InpaintingLoss()
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
     
-    # Create directory for saving models
-    os.makedirs('models', exist_ok=True)
+    # Create checkpoint directory
+    os.makedirs(checkpoint_dir, exist_ok=True)
     
-    # Start Training
+    # Train model
     train_model(
         model=model,
         train_loader=train_loader,
@@ -301,6 +348,9 @@ if __name__ == "__main__":
         optimizer=optimizer,
         device=device,
         num_epochs=num_epochs,
-        save_every=10,
-        checkpoint_dir='models'
+        save_every=5,
+        checkpoint_dir=checkpoint_dir
     )
+
+if __name__ == "__main__":
+    main()
