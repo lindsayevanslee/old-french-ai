@@ -1,155 +1,139 @@
 """
-Enhanced U-Net model for manuscript inpainting with attention mechanisms.
-The model takes advantage of pre-computed masks and uses attention to better
-handle the specific challenges of medieval manuscript inpainting.
+Memory-efficient U-Net model for manuscript inpainting with proper channel handling.
+This version carefully manages channel dimensions throughout the network.
 """
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-class AttentionBlock(nn.Module):
-    """Attention mechanism for focusing on relevant features during inpainting."""
-    def __init__(self, in_channels):
-        super(AttentionBlock, self).__init__()
-        self.query = nn.Conv2d(in_channels, in_channels//8, 1)
-        self.key = nn.Conv2d(in_channels, in_channels//8, 1)
-        self.value = nn.Conv2d(in_channels, in_channels, 1)
-        self.gamma = nn.Parameter(torch.zeros(1))
-        
-    def forward(self, x):
-        batch_size, channels, height, width = x.size()
-        
-        # Create query, key, value projections
-        proj_query = self.query(x).view(batch_size, -1, height * width).permute(0, 2, 1)
-        proj_key = self.key(x).view(batch_size, -1, height * width)
-        proj_value = self.value(x).view(batch_size, -1, height * width)
-        
-        # Calculate attention
-        energy = torch.bmm(proj_query, proj_key)
-        attention = F.softmax(energy, dim=-1)
-        
-        # Apply attention to values
-        out = torch.bmm(proj_value, attention.permute(0, 2, 1))
-        out = out.view(batch_size, channels, height, width)
-        
-        return self.gamma * out + x
-
 class DoubleConv(nn.Module):
     """Double convolution block with residual connection."""
     def __init__(self, in_channels, out_channels):
         super(DoubleConv, self).__init__()
         self.conv = nn.Sequential(
-            nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1, bias=False),
+            nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1),
             nn.BatchNorm2d(out_channels),
             nn.ReLU(inplace=True),
-            nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1, bias=False),
+            nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1),
             nn.BatchNorm2d(out_channels),
             nn.ReLU(inplace=True)
         )
-        # Add residual connection if input and output channels match
-        self.residual = nn.Conv2d(in_channels, out_channels, kernel_size=1) if in_channels != out_channels else nn.Identity()
+        
+        # Only use residual connection if input and output channels match
+        self.use_residual = (in_channels == out_channels)
         
     def forward(self, x):
-        return self.conv(x) + self.residual(x)
+        conv_out = self.conv(x)
+        if self.use_residual:
+            return conv_out + x
+        return conv_out
 
 class UNetInpaint(nn.Module):
-    def __init__(self, in_channels=4, out_channels=3, features=[64, 128, 256, 512]):
+    def __init__(self, in_channels=4, out_channels=3):
         """
-        Enhanced U-Net for manuscript inpainting.
+        Memory-efficient U-Net for manuscript inpainting with proper channel handling.
         
         Args:
             in_channels (int): Number of input channels (RGB + Mask = 4)
             out_channels (int): Number of output channels (RGB = 3)
-            features (list): Feature dimensions for each level
         """
         super(UNetInpaint, self).__init__()
         
-        # Encoder path
-        self.encoder = nn.ModuleList()
-        self.attention_blocks = nn.ModuleList()
+        # Define feature dimensions for each level
+        # Using smaller feature sizes to save memory
+        self.features = [32, 64, 128, 256]
         
-        # Initial convolution to process the input
-        self.initial_conv = DoubleConv(in_channels, features[0])
+        # Initial convolution
+        self.inc = DoubleConv(in_channels, self.features[0])
         
-        # Encoder blocks with attention
-        in_channels = features[0]
-        for feature in features[1:]:
-            self.encoder.append(nn.Sequential(
+        # Encoder (downsampling) path
+        self.down_convs = nn.ModuleList()
+        for i in range(len(self.features) - 1):
+            self.down_convs.append(nn.Sequential(
                 nn.MaxPool2d(2),
-                DoubleConv(in_channels, feature)
+                DoubleConv(self.features[i], self.features[i + 1])
             ))
-            self.attention_blocks.append(AttentionBlock(feature))
-            in_channels = feature
-            
+        
         # Bottleneck
         self.bottleneck = nn.Sequential(
             nn.MaxPool2d(2),
-            DoubleConv(features[-1], features[-1] * 2),
-            AttentionBlock(features[-1] * 2),
-            nn.ConvTranspose2d(features[-1] * 2, features[-1], kernel_size=2, stride=2)
+            DoubleConv(self.features[-1], self.features[-1]),
+            nn.ConvTranspose2d(self.features[-1], self.features[-1], kernel_size=2, stride=2)
         )
         
-        # Decoder path
-        self.decoder = nn.ModuleList()
-        self.upconvs = nn.ModuleList()
+        # Decoder (upsampling) path
+        # Note: input channels are doubled due to skip connections
+        self.up_convs = nn.ModuleList()
+        self.up_trans = nn.ModuleList()
         
-        for feature in reversed(features[1:]):
-            self.upconvs.append(
-                nn.ConvTranspose2d(feature * 2, feature, kernel_size=2, stride=2)
+        for i in range(len(self.features) - 1, 0, -1):
+            # Upsampling convolution
+            self.up_trans.append(
+                nn.ConvTranspose2d(self.features[i], self.features[i-1], kernel_size=2, stride=2)
             )
-            self.decoder.append(DoubleConv(feature * 2, feature))
-            
+            # Convolution after concatenation
+            # Input channels = current level features + same level features from encoder
+            self.up_convs.append(
+                DoubleConv(self.features[i-1] * 2, self.features[i-1])
+            )
+        
         # Final convolution
-        self.final_conv = nn.Sequential(
-            nn.Conv2d(features[0], features[0] // 2, kernel_size=3, padding=1),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(features[0] // 2, out_channels, kernel_size=1),
-            nn.Sigmoid()  # Ensure output is in [0,1] range
+        self.outc = nn.Sequential(
+            nn.Conv2d(self.features[0], out_channels, kernel_size=1),
+            nn.Sigmoid()
         )
         
     def forward(self, x):
-        # Store skip connections
-        skip_connections = []
-        
         # Initial convolution
-        x = self.initial_conv(x)
-        skip_connections.append(x)
+        x1 = self.inc(x)
         
-        # Encoder path
-        for i, (enc, attn) in enumerate(zip(self.encoder, self.attention_blocks)):
-            x = enc(x)
-            x = attn(x)
+        # Encoder path with skip connections
+        skip_connections = [x1]
+        x = x1
+        
+        for down_conv in self.down_convs:
+            x = down_conv(x)
             skip_connections.append(x)
-            
+        
         # Bottleneck
         x = self.bottleneck(x)
         
-        # Decoder path with skip connections
-        skip_connections = skip_connections[::-1]  # Reverse for decoder
+        # Decoder path
+        skip_connections = skip_connections[:-1]  # Remove last skip connection (same as bottleneck output)
+        skip_connections = skip_connections[::-1]  # Reverse for decoder path
         
-        for i, (upconv, dec) in enumerate(zip(self.upconvs, self.decoder)):
-            x = upconv(x)
+        for i in range(len(self.up_convs)):
+            # Upscale current features
+            x = self.up_trans[i](x)
+            
+            skip = skip_connections[i]
             
             # Handle potential size mismatch
-            if x.shape != skip_connections[i].shape:
-                x = F.interpolate(x, size=skip_connections[i].shape[2:])
-                
-            # Concatenate skip connection
-            concat_skip = torch.cat((skip_connections[i], x), dim=1)
-            x = dec(concat_skip)
+            if x.shape[-2:] != skip.shape[-2:]:
+                x = F.interpolate(x, size=skip.shape[-2:], mode='bilinear', align_corners=True)
             
+            # Concatenate skip connection
+            x = torch.cat([skip, x], dim=1)
+            
+            # Apply convolutions
+            x = self.up_convs[i](x)
+        
         # Final convolution
-        return self.final_conv(x)
+        return self.outc(x)
 
 def test_model():
-    """Test the model with dummy data."""
+    """Test the model with dummy data and print intermediate shapes."""
     model = UNetInpaint()
-    x = torch.randn((1, 4, 1000, 1000))  # Batch size 1, 4 channels (RGB + Mask), 1000x1000
-    out = model(x)
+    x = torch.randn((1, 4, 1000, 1000))
     print(f"Input shape: {x.shape}")
+    
+    # Forward pass
+    out = model(x)
     print(f"Output shape: {out.shape}")
     print(f"Output value range: [{out.min().item():.3f}, {out.max().item():.3f}]")
     
+    return out.shape == (1, 3, 1000, 1000)
+
 if __name__ == "__main__":
     test_model()
