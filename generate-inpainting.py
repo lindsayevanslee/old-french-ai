@@ -183,19 +183,25 @@ def generate_inpainting(mutilated_path, excised_path, mask_path):
     plt.show()
 
 def main():
-    """Main function to run the inpainting generation."""
-    # Define paths
     base_dir = 'data/digitized versions/Vies des saints'
-    mutilated_path = f'{base_dir}/mutilations/page_11_mutilated.jpeg'
-    excised_path = f'{base_dir}/excisions/page_11_excised.jpeg'
-    mask_path = f'{base_dir}/masks/page_11_mask.jpeg'
-    
-    # Verify all files exist
-    for path in [mutilated_path, excised_path, mask_path]:
-        if not os.path.exists(path):
-            raise FileNotFoundError(f"File not found: {path}")
-    
-    generate_inpainting(mutilated_path, excised_path, mask_path)
+    mutilations_dir = f'{base_dir}/mutilations'
+    excisions_dir = f'{base_dir}/excisions'
+    masks_dir = f'{base_dir}/masks'
+
+    for filename in os.listdir(mutilations_dir):
+        if filename.endswith(('.jpeg', '.jpg', '.png')):
+            mutilated_path = os.path.join(mutilations_dir, filename)
+            excised_filename = filename.replace('mutilated', 'excised')
+            mask_filename = filename.replace('mutilated', 'mask')
+            excised_path = os.path.join(excisions_dir, excised_filename)
+            mask_path = os.path.join(masks_dir, mask_filename)
+
+            # Verify all files exist
+            for path in [mutilated_path, excised_path, mask_path]:
+                if not os.path.exists(path):
+                    raise FileNotFoundError(f"File not found: {path}")
+
+            generate_inpainting(mutilated_path, excised_path, mask_path)
 
 if __name__ == "__main__":
     main()
