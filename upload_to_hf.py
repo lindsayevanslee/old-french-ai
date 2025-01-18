@@ -110,11 +110,11 @@ output = model(input_tensor)
 
 
 # Upload model card (documentation)
-with open("README.md", "w") as f:
+with open("checkpoints/README.md", "w") as f:
     f.write(readme_content)
 
 api.upload_file(
-    path_or_fileobj="README.md",
+    path_or_fileobj="checkpoints/README.md",
     path_in_repo="README.md",
     repo_id=f"{my_username}/{repo_name}",
     commit_message="Add model documentation"
