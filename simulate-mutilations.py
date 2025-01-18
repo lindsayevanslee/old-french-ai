@@ -45,7 +45,7 @@ class ManuscriptDataset(Dataset):
         # Create excision image by removing the mutilated parts
         excision_image = image_transformed * (1 - mask)
 
-        return mutilated_image, excision_image, img_name
+        return mutilated_image, excision_image, (1 - mask), img_name
 
     def generate_random_mask(self, height, width):
         mask = Image.new('L', (width, height), 1)  # Start with all ones (no masking)
@@ -86,11 +86,13 @@ def generate_and_save_mutilations(
     complete_dir='data/digitized versions/Vies des saints/jpeg/',
     mutilations_dir='data/digitized versions/Vies des saints/mutilations/',
     excisions_dir='data/digitized versions/Vies des saints/excisions/',
+    masks_dir='data/digitized versions/Vies des saints/masks/',
     img_size=1000
 ):
     # Create output directories if they don't exist
     os.makedirs(mutilations_dir, exist_ok=True)
     os.makedirs(excisions_dir, exist_ok=True)
+    os.makedirs(masks_dir, exist_ok=True)
 
     # Define transformations
     transform = transforms.Compose([
@@ -107,16 +109,18 @@ def generate_and_save_mutilations(
 
     total = len(dataset)
     for idx in range(total):
-        mutilated_img, excision_img, img_name = dataset[idx]
+        mutilated_img, excision_img, mask_img, img_name = dataset[idx]
 
-        # Generate filenames for mutilated and excision images
+        # Generate filenames for mutilated, excision, and mask images
         name, ext = os.path.splitext(img_name)
         mutilation_name = f"{name}_mutilated{ext}"
         excision_name = f"{name}_excised{ext}"
+        mask_name = f"{name}_mask{ext}"
 
         # Define save paths
         mutilation_save_path = os.path.join(mutilations_dir, mutilation_name)
         excision_save_path = os.path.join(excisions_dir, excision_name)
+        mask_save_path = os.path.join(masks_dir, mask_name)
 
         # Save the mutilated image
         save_image(mutilated_img, mutilation_save_path)
@@ -124,12 +128,16 @@ def generate_and_save_mutilations(
         # Save the excision image
         save_image(excision_img, excision_save_path)
 
+        # Save the mask image
+        save_image(mask_img, mask_save_path)
+
         # Optional: Print progress every 100 images
         if (idx + 1) % 100 == 0:
             print(f"Processed {idx + 1} / {total} images")
 
     print(f"All mutilated images have been saved to {mutilations_dir}")
     print(f"All excised images have been saved to {excisions_dir}")
+    print(f"All mask images have been saved to {masks_dir}")
 
 if __name__ == "__main__":
     generate_and_save_mutilations()
