@@ -53,7 +53,7 @@ def load_and_process_image(mutilated_path, mask_path, img_size=1000):
     input_tensor = torch.cat([mutilated, mask_binary], dim=0)
     return input_tensor.unsqueeze(0), original_size, original_image
 
-def create_inpainted_overlay(output_image, original_image, mask_image, feather_amount=3):
+def create_inpainted_overlay(output_image, original_image, mask_image, feather_amount=5):
     """
     Create a seamless overlay of the inpainted region on the original image.
     
@@ -67,24 +67,39 @@ def create_inpainted_overlay(output_image, original_image, mask_image, feather_a
         numpy.ndarray: The final overlaid image
     """
     # Convert everything to numpy arrays in the same size
-    original_array = np.array(original_image)
-    mask_array = np.array(mask_image.resize(original_image.size, Image.Resampling.LANCZOS)).astype(float) / 255.0
+    original_array = np.array(original_image).astype(float) / 255.0
     
-    # Resize output image to match original size
+    # Process the mask with antialiasing to prevent jagged edges
+    mask_array = np.array(mask_image.resize(original_image.size, 
+                                          Image.Resampling.LANCZOS)).astype(float) / 255.0
+    
+    # Resize output image to match original size with antialiasing
     output_resized = np.array(Image.fromarray((output_image * 255).astype(np.uint8)).resize(
         original_image.size, Image.Resampling.LANCZOS))
     output_resized = output_resized.astype(float) / 255.0
     
-    # Create feathered mask
+    # Create feathered mask using Gaussian blur
     from scipy.ndimage import gaussian_filter
+    
+    # Apply Gaussian blur to create soft edges
     feathered_mask = gaussian_filter(mask_array, sigma=feather_amount)
     
-    # Expand dimensions for broadcasting
+    # Ensure mask values are properly bounded
+    feathered_mask = np.clip(feathered_mask, 0, 1)
+    
+    # Expand dimensions for broadcasting while preserving mask integrity
     feathered_mask = feathered_mask[..., np.newaxis]
     
-    # Blend images using the feathered mask
-    blended = (output_resized * feathered_mask) + (original_array.astype(float) / 255.0 * (1 - feathered_mask))
+    # Create transition zone for smoother blending
+    transition_mask = np.clip(feathered_mask * 1.5, 0, 1)  # Slightly expand blend region
     
+    # Perform blending with properly scaled values
+    blended = (output_resized * transition_mask) + (original_array * (1 - transition_mask))
+    
+    # Ensure final values are in valid range
+    blended = np.clip(blended, 0, 1)
+    
+    # Convert back to uint8 format
     return (blended * 255).astype(np.uint8)
 
 def generate_inpainting(mutilated_path, excised_path, mask_path):
