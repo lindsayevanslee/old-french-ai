@@ -1,4 +1,8 @@
-"""Apply inpainting from trained model"""
+"""
+Apply inpainting from trained model using pre-computed masks.
+This script loads a trained inpainting model and generates results using
+pre-computed masks, creating visualizations to compare the results.
+"""
 
 import torch
 from inpainting_model import UNetInpaint
@@ -6,85 +10,139 @@ from PIL import Image
 from torchvision import transforms
 import matplotlib.pyplot as plt
 import os
+from pathlib import Path
 
-def load_and_process_image(mutilated_path, excised_path, img_size=512):
+def load_and_process_image(mutilated_path, mask_path, img_size=1000):
+    """
+    Load and process images for inpainting using pre-computed masks.
+    
+    Args:
+        mutilated_path (str): Path to the mutilated image
+        mask_path (str): Path to the pre-computed mask
+        img_size (int): Size to resize images to (default: 1000 to match training)
+        
+    Returns:
+        torch.Tensor: Processed input tensor ready for the model
+    """
     # Load images
     mutilated = Image.open(mutilated_path).convert('RGB')
-    excised = Image.open(excised_path).convert('RGB')
+    mask = Image.open(mask_path).convert('L')  # Load mask as grayscale
     
-    # Create mask from excised image
-    mask = excised.point(lambda x: 255 if x > 0 else 0)
-    
-    # Apply transforms
+    # Define transforms
     transform = transforms.Compose([
         transforms.Resize((img_size, img_size)),
         transforms.ToTensor(),
     ])
     
+    # Apply transforms
     mutilated = transform(mutilated)
     mask = transform(mask)
     
-    # Create binary mask
-    mask_gray = mask.mean(dim=0)
-    mask_binary = (mask_gray > 0).float().unsqueeze(0)
+    # Ensure mask is binary
+    mask_binary = (mask > 0.5).float()
     
     # Combine image and mask
     input_tensor = torch.cat([mutilated, mask_binary], dim=0)
     return input_tensor.unsqueeze(0)
 
-def generate_inpainting(mutilated_path, excised_path):
-
-    # Extract page number from the mutilated path
-    page_number = mutilated_path.split('page_')[1].split('_')[0]
-
-
+def generate_inpainting(mutilated_path, excised_path, mask_path):
+    """
+    Generate and visualize inpainting results.
+    
+    Args:
+        mutilated_path (str): Path to the mutilated image
+        excised_path (str): Path to the excised content (for visualization)
+        mask_path (str): Path to the pre-computed mask
+    """
+    # Extract page number from the path
+    page_number = Path(mutilated_path).stem.split('_')[1]
+    
     # Load the trained model
     model = UNetInpaint()
-    checkpoint = torch.load('models/unet_inpaint_epoch_40.pth', weights_only=False)
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    print(f"Using device: {device}")
+    
+    # Load checkpoint
+    checkpoint_path = 'checkpoints/unet_inpaint_best.pth'
+    if not os.path.exists(checkpoint_path):
+        raise FileNotFoundError(f"No checkpoint found at {checkpoint_path}")
+    
+    checkpoint = torch.load(checkpoint_path, map_location=device)
     model.load_state_dict(checkpoint['model_state_dict'])
     model.eval()
-    
-    # Move to GPU if available
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model = model.to(device)
     
     # Load and process images
-    input_tensor = load_and_process_image(mutilated_path, excised_path).to(device)
+    input_tensor = load_and_process_image(mutilated_path, mask_path)
+    input_tensor = input_tensor.to(device)
     
     # Generate inpainting
+    print("Generating inpainting...")
     with torch.no_grad():
         output = model(input_tensor)
     
-    # Convert to image
+    # Convert output to image
     output_image = output.cpu().squeeze(0).permute(1, 2, 0).numpy()
+    output_image = output_image.clip(0, 1)  # Ensure values are in valid range
     
-    # Plot results
-    fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+    # Create visualization
+    fig, axes = plt.subplots(2, 2, figsize=(15, 15))
+    fig.suptitle(f'Inpainting Results for Page {page_number}', fontsize=16)
     
     # Original mutilated image
-    axes[0].imshow(Image.open(mutilated_path))
-    axes[0].set_title('Mutilated Image')
-    axes[0].axis('off')
+    axes[0, 0].imshow(Image.open(mutilated_path))
+    axes[0, 0].set_title('Mutilated Image')
+    axes[0, 0].axis('off')
     
-    # Mask (excised image)
-    axes[1].imshow(Image.open(excised_path))
-    axes[1].set_title('Excision Mask')
-    axes[1].axis('off')
+    # Mask
+    axes[0, 1].imshow(Image.open(mask_path), cmap='gray')
+    axes[0, 1].set_title('Inpainting Mask')
+    axes[0, 1].axis('off')
+    
+    # Excised content (ground truth)
+    axes[1, 0].imshow(Image.open(excised_path))
+    axes[1, 0].set_title('Excised Content (Ground Truth)')
+    axes[1, 0].axis('off')
     
     # Inpainted result
-    axes[2].imshow(output_image)
-    axes[2].set_title('Inpainted Result')
-    axes[2].axis('off')
+    axes[1, 1].imshow(output_image)
+    axes[1, 1].set_title('Inpainted Result')
+    axes[1, 1].axis('off')
     
-    # Create directory if it doesn't exist
+    # Adjust layout and save
+    plt.tight_layout()
     save_dir = 'data/digitized versions/Vies des saints/model_results'
     os.makedirs(save_dir, exist_ok=True)
     
-    # Save figure
-    plt.savefig(os.path.join(save_dir, f'page_{page_number}_inpainting_comparison.png'))
+    # Save figure with high DPI for better quality
+    save_path = os.path.join(save_dir, f'page_{page_number}_inpainting_comparison.png')
+    plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    print(f"Saved comparison image to {save_path}")
+    
+    # Also save just the inpainted result
+    inpainted_save_path = os.path.join(save_dir, f'page_{page_number}_inpainted.png')
+    plt.figure(figsize=(10, 10))
+    plt.imshow(output_image)
+    plt.axis('off')
+    plt.savefig(inpainted_save_path, dpi=300, bbox_inches='tight')
+    print(f"Saved inpainted result to {inpainted_save_path}")
+    
     plt.show()
 
+def main():
+    """Main function to run the inpainting generation."""
+    # Define paths
+    base_dir = 'data/digitized versions/Vies des saints'
+    mutilated_path = f'{base_dir}/mutilations/page_11_mutilated.jpeg'
+    excised_path = f'{base_dir}/excisions/page_11_excised.jpeg'
+    mask_path = f'{base_dir}/masks/page_11_mask.jpeg'
+    
+    # Verify all files exist
+    for path in [mutilated_path, excised_path, mask_path]:
+        if not os.path.exists(path):
+            raise FileNotFoundError(f"File not found: {path}")
+    
+    generate_inpainting(mutilated_path, excised_path, mask_path)
+
 if __name__ == "__main__":
-    mutilated_path = 'data/digitized versions/Vies des saints/mutilations/page_14_mutilated.jpeg'
-    excised_path = 'data/digitized versions/Vies des saints/excisions/page_14_excised.jpeg'
-    generate_inpainting(mutilated_path, excised_path)
+    main()
