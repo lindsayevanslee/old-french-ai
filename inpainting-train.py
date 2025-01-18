@@ -109,7 +109,13 @@ class InpaintingLoss(nn.Module):
         return self.alpha * masked_loss + (1 - self.alpha) * l1_loss
 
 def validate_model(model, val_loader, criterion, device):
-    """Run validation loop with memory optimization."""
+    """Run validation loop with memory optimization and robust metric calculation.
+    
+    This function handles validation carefully by:
+    1. Computing metrics on full images first
+    2. Using a smaller window size for SSIM calculation
+    3. Properly handling edge cases in metric computation
+    """
     model.eval()
     val_loss = 0
     val_metrics = {'psnr': 0, 'ssim': 0}
@@ -121,25 +127,48 @@ def validate_model(model, val_loader, criterion, device):
             targets = targets.to(device)
             masks = masks.to(device)
             
+            # Generate predictions
             outputs = model(inputs)
             loss = criterion(outputs, targets, masks)
             val_loss += loss.item()
             
-            # Calculate metrics on CPU to save GPU memory
+            # Move tensors to CPU and convert to numpy for metric calculation
             outputs_np = outputs.cpu().numpy()
             targets_np = targets.cpu().numpy()
             
             for i in range(outputs_np.shape[0]):
+                # Convert images to HWC format for metric calculation
                 output_img = np.transpose(outputs_np[i], (1, 2, 0))
                 target_img = np.transpose(targets_np[i], (1, 2, 0))
                 
-                val_metrics['psnr'] += psnr(target_img, output_img, data_range=1.0)
-                val_metrics['ssim'] += ssim(
-                    target_img, 
-                    output_img,
-                    multichannel=True,
-                    data_range=1.0
-                )
+                # Ensure values are in valid range
+                output_img = np.clip(output_img, 0, 1)
+                target_img = np.clip(target_img, 0, 1)
+                
+                try:
+                    # Calculate PSNR
+                    psnr_value = psnr(target_img, output_img, data_range=1.0)
+                    
+                    # Calculate SSIM with smaller window size and explicit channel axis
+                    ssim_value = ssim(
+                        target_img, 
+                        output_img,
+                        win_size=5,  # Use smaller window size
+                        channel_axis=2,  # Specify channel axis
+                        data_range=1.0,
+                        gaussian_weights=True,  # Use Gaussian weighting for better stability
+                    )
+                    
+                    # Update metrics only if calculation was successful
+                    if not np.isnan(psnr_value):
+                        val_metrics['psnr'] += psnr_value
+                    if not np.isnan(ssim_value):
+                        val_metrics['ssim'] += ssim_value
+                        
+                except Exception as e:
+                    # Log error but continue validation
+                    logging.warning(f"Error calculating metrics: {str(e)}")
+                    continue
             
             num_batches += 1
             
@@ -147,10 +176,14 @@ def validate_model(model, val_loader, criterion, device):
             del outputs, loss
             clear_gpu_memory()
     
-    # Calculate averages
-    val_loss /= num_batches
+    # Calculate averages, handling case where some metrics failed
+    val_loss /= max(num_batches, 1)  # Avoid division by zero
+    
     for metric in val_metrics:
-        val_metrics[metric] /= (num_batches * inputs.shape[0])
+        val_metrics[metric] /= max(num_batches, 1)
+        # Log if metrics seem suspicious
+        if val_metrics[metric] < 0 or val_metrics[metric] > 100:
+            logging.warning(f"Suspicious {metric} value: {val_metrics[metric]}")
     
     return val_loss, val_metrics
 
