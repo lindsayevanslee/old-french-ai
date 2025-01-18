@@ -30,14 +30,14 @@ This model performs inpainting on historical manuscript images to restore damage
 
 The model was trained on:
 - Historical manuscript images from [describe your dataset]
-- Image size: 512x512 pixels
+- Image size: 1000x1000 pixels
 - Number of training images: [number]
 - Types of damage: [describe types of damage/restoration needed]
 
 ### Training Procedure
 
 - **Framework:** PyTorch
-- **Training Duration:** 40 epochs
+- **Training Duration:** 50 epochs
 - **Optimization:** Adam optimizer
 - **Loss Function:** L1 Loss
 - **Evaluation Metrics:** PSNR, SSIM
@@ -45,10 +45,10 @@ The model was trained on:
 
 ## Performance
 
-The model achieved:
-- PSNR: 28.35
-- SSIM: 0.9715
-- Validation Loss: 0.0098
+At Epoch 42/50 model achieved:
+- PSNR: 29.74
+- SSIM: 0.9798
+- Validation Loss: 0.0043
 
 ## Usage
 
@@ -59,8 +59,8 @@ from huggingface_hub import hf_hub_download
 
 # Download the model
 model_path = hf_hub_download(
-    repo_id="lindsayevanslee/manuscript-inpainting",
-    filename="unet_inpaint.pth"
+    repo_id="lindsayevanslee/old-french-ai",
+    filename="unet_inpaint_best.pth"
 )
 
 # Load the model
