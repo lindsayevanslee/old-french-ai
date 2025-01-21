@@ -160,7 +160,7 @@ def generate_inpainting(mutilated_path, excised_path, mask_path):
     axes[1, 1].axis('off')
     
     # Save comparison figure
-    save_dir = 'data/digitized versions/Vies des saints/model_results'
+    save_dir = 'data/digitized versions/Vies des saints/model_results/unet_trained'
     os.makedirs(save_dir, exist_ok=True)
     comparison_path = os.path.join(save_dir, f'page_{page_number}_inpainting_comparison.png')
     plt.savefig(comparison_path, dpi=300, bbox_inches='tight')
