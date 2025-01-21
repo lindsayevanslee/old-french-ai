@@ -34,8 +34,7 @@ files = [f for f in os.listdir(mutilations_dir) if f.endswith(".jpeg")]
 
 # Loop through all images in the mutilations directory with progress bar
 for i, filename in enumerate(tqdm(files, desc="Processing images", unit="image")):
-    if i >= 10:
-        break
+
     mutilated_image_path = os.path.join(mutilations_dir, filename)
     mask_image_path = os.path.join(masks_dir, filename.replace("mutilated", "mask"))
     excision_image_path = os.path.join(excision_dir, filename.replace("mutilated", "excised"))
