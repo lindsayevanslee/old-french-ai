@@ -92,25 +92,18 @@ class ManuscriptDataset(Dataset):
         return mutilated_t, mask_t, excised_t
 
 def train_inpainting_model(model_path, dataloader, device='cuda'):
-    """Fine-tune the stable diffusion inpainting model with proper timestep handling.
-    
-    The training process follows these steps:
-    1. Convert images to latent space using the VAE
-    2. Add noise to the latents according to a noise schedule
-    3. Train the UNet to predict this noise
-    4. Use the scheduler to gradually denoise during inference
-    """
+    """Fine-tune the stable diffusion inpainting model with correct precision handling."""
     print(f"Training on device: {device}")
 
-    # Initialize the pipeline with half precision for memory efficiency
+    # Initialize the pipeline in full precision first
     pipe = StableDiffusionInpaintPipeline.from_pretrained(
         model_path,
-        torch_dtype=torch.float16,
+        torch_dtype=torch.float32,  # Start with full precision
         safety_checker=None
     )
     pipe.to(device)
     
-    # Freeze components we don't want to train
+    # Freeze text encoder + VAE
     pipe.text_encoder.eval()
     pipe.vae.eval()
     for param in pipe.text_encoder.parameters():
@@ -121,20 +114,20 @@ def train_inpainting_model(model_path, dataloader, device='cuda'):
     # Prepare UNet for training
     pipe.unet.train()
     pipe.unet.enable_gradient_checkpointing()
-    pipe.enable_attention_slicing()
-
-    # Use a simpler scheduler with fewer steps
+    pipe.enable_attention_slicing(slice_size="auto")
+    
+    # Use simpler scheduler
     pipe.scheduler = DDPMScheduler(
-        num_train_timesteps=250,
-        beta_start=0.0001,
-        beta_end=0.02,
-        beta_schedule="linear"
+        num_train_timesteps=100,
+        beta_start=0.00085,
+        beta_end=0.012,
+        beta_schedule="scaled_linear"
     )
 
-    # Create conditioning prompt for the model
+    # Create conditioning prompt
     text_prompt = ["restore this medieval manuscript text"]
     
-    # Precompute text embeddings - these guide the restoration process
+    # Precompute text embeddings
     with torch.no_grad():
         tokens = pipe.tokenizer(
             text_prompt,
@@ -147,89 +140,125 @@ def train_inpainting_model(model_path, dataloader, device='cuda'):
         text_embeddings = pipe.text_encoder(tokens)[0]
         text_embeddings = text_embeddings.detach()
 
-    # Set up optimizer for UNet parameters
-    optimizer = torch.optim.AdamW(pipe.unet.parameters(), lr=1e-5)
+    # Initialize optimizer with stability settings
+    optimizer = torch.optim.AdamW(
+        pipe.unet.parameters(),
+        lr=1e-6,
+        betas=(0.9, 0.999),
+        eps=1e-8,
+        weight_decay=0.01
+    )
     
-    # VAE scaling factor from SD configuration
+    # Add learning rate scheduler
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer,
+        mode='min',
+        factor=0.5,
+        patience=5,
+        verbose=True
+    )
+
+    # Initialize gradient scaler for mixed precision training
+    scaler = torch.amp.GradScaler()  # Updated from torch.cuda.amp
+    
     vae_scaling_factor = 0.18215
 
     num_epochs = 10
+    max_grad_norm = 1.0
+    
     for epoch in range(num_epochs):
         print(f"Starting epoch {epoch + 1}/{num_epochs}")
         epoch_loss = 0
         
         for batch_idx, (mutilated, mask, excised) in enumerate(dataloader):
-            # Move batch to device and convert to half precision
-            mutilated = mutilated.half().to(device)
-            mask = mask.half().to(device)
-            excised = excised.half().to(device)
+            # Move data to device (keep in full precision)
+            mutilated = mutilated.to(device)
+            mask = mask.to(device)
+            excised = excised.to(device)
 
-            # Convert images to latent space
-            with torch.no_grad():
-                # Encode the mutilated image
-                mutilated_latents = pipe.vae.encode(mutilated).latent_dist.sample()
-                mutilated_latents = mutilated_latents * vae_scaling_factor
-                
-                # Generate random noise and timesteps
-                noise = torch.randn_like(mutilated_latents)
-                
-                # Generate a single timestep for the entire batch
-                # This fixes the shape mismatch issue
-                timestep = torch.randint(
-                    0, 
-                    pipe.scheduler.config.num_train_timesteps, 
-                    (1,),
-                    device=device
-                ).long()
-                
-                # Add noise according to the scheduler
-                noisy_latents = pipe.scheduler.add_noise(
-                    mutilated_latents, 
-                    noise, 
-                    timestep.repeat(mutilated_latents.shape[0])
-                )
-
-                # Prepare masked image latents
-                masked_image = mutilated * (1 - mask)
-                masked_image_latents = pipe.vae.encode(masked_image).latent_dist.sample()
-                masked_image_latents = masked_image_latents * vae_scaling_factor
-
-                # Resize mask to match latent resolution
-                mask_resized = torch.nn.functional.interpolate(
-                    mask, 
-                    size=mutilated_latents.shape[-2:],
-                    mode='nearest'
-                )
-
-            # Prepare the full input for the UNet
-            model_input = torch.cat([noisy_latents, mask_resized, masked_image_latents], dim=1)
-
-            # Forward pass through UNet
-            noise_pred = pipe.unet(
-                model_input,
-                timestep,  # Use single timestep for the batch
-                encoder_hidden_states=text_embeddings.repeat(model_input.shape[0], 1, 1)
-            ).sample
-
-            # Compute loss between predicted and actual noise
-            loss = nn.MSELoss()(noise_pred, noise)
-
-            # Backpropagation
             optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
+
+            # Use automatic mixed precision
+            with torch.amp.autocast(device_type='cuda', dtype=torch.float16):
+                with torch.no_grad():
+                    # Encode images
+                    mutilated_latents = pipe.vae.encode(mutilated).latent_dist.sample()
+                    mutilated_latents = mutilated_latents * vae_scaling_factor
+                    
+                    # Generate noise
+                    noise = torch.randn_like(mutilated_latents)
+                    timestep = torch.randint(
+                        0,
+                        pipe.scheduler.config.num_train_timesteps,
+                        (1,),
+                        device=device
+                    ).long()
+                    
+                    # Add noise
+                    noisy_latents = pipe.scheduler.add_noise(
+                        mutilated_latents,
+                        noise,
+                        timestep.repeat(mutilated_latents.shape[0])
+                    )
+
+                    # Prepare masked image latents
+                    masked_image = mutilated * (1 - mask)
+                    masked_image_latents = pipe.vae.encode(masked_image).latent_dist.sample()
+                    masked_image_latents = masked_image_latents * vae_scaling_factor
+
+                    # Resize mask
+                    mask_resized = torch.nn.functional.interpolate(
+                        mask,
+                        size=mutilated_latents.shape[-2:],
+                        mode='nearest'
+                    )
+
+                # Prepare model input
+                model_input = torch.cat([noisy_latents, mask_resized, masked_image_latents], dim=1)
+
+                # Forward pass
+                noise_pred = pipe.unet(
+                    model_input,
+                    timestep,
+                    encoder_hidden_states=text_embeddings.repeat(model_input.shape[0], 1, 1)
+                ).sample
+
+                # Compute loss
+                loss = nn.MSELoss()(noise_pred.float(), noise.float())
+
+            # Scale loss and compute gradients
+            scaler.scale(loss).backward()
+            
+            # Unscale gradients and clip
+            if not torch.isnan(loss):
+                scaler.unscale_(optimizer)
+                torch.nn.utils.clip_grad_norm_(pipe.unet.parameters(), max_grad_norm)
+            
+                # Update weights
+                scaler.step(optimizer)
+                scaler.update()
 
             epoch_loss += loss.item()
 
             if batch_idx % 10 == 0:
                 print(f"Epoch {epoch+1}, Batch {batch_idx}, Loss: {loss.item():.4f}")
 
-            # Periodically clear GPU memory
+            # Clear GPU memory periodically
             if batch_idx % 100 == 0:
                 torch.cuda.empty_cache()
 
-        print(f"Epoch {epoch+1} average loss: {epoch_loss/len(dataloader):.4f}")
+        # Update learning rate based on epoch loss
+        avg_epoch_loss = epoch_loss / len(dataloader)
+        scheduler.step(avg_epoch_loss)
+        print(f"Epoch {epoch+1} average loss: {avg_epoch_loss:.4f}")
 
+        # Early stopping if loss is NaN
+        if torch.isnan(torch.tensor(avg_epoch_loss)):
+            print("Training stopped due to NaN loss")
+            break
+
+    # Convert back to half precision for saving
+    pipe.to(torch_dtype=torch.float16)
     return pipe
 
 def main():
@@ -250,15 +279,15 @@ def main():
     )
     
     # Using a larger batch size since we're not computing masks on the fly
-    dataloader = DataLoader(dataset, batch_size=4, shuffle=True)
+    dataloader = DataLoader(dataset, batch_size=1, shuffle=True)
 
     # Train model
     model_path = "runwayml/stable-diffusion-inpainting"
     trained_pipe = train_inpainting_model(model_path, dataloader, device=device)
 
     # Save the trained model
-    trained_pipe.save_pretrained("manuscript_restoration_model2")
-    print("Done! Model saved to 'manuscript_restoration_model2'")
+    trained_pipe.save_pretrained("manuscript_restoration_model3")
+    print("Done! Model saved to 'manuscript_restoration_model3'")
 
 if __name__ == "__main__":
     main()
