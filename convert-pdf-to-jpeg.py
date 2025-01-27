@@ -16,10 +16,10 @@ def pdf_to_jpeg(pdf_path, output_folder):
         print(f'Saved {image_path}')
 
 if __name__ == "__main__":
-    pdf_path = 'data/digitized versions/Vies des saints/original/Vies_de_saints_en_français__btv1b9063234c.pdf'
-    output_folder = 'data/digitized versions/Vies des saints/jpeg'
+    pdf_path = 'data/digitized versions/Petrus Lombardus Sententiae/original/Petrus_Lombardus_Sententiae_Pierre_Lombard_btv1b10840644t.pdf'
+    output_folder = 'data/digitized versions/Petrus Lombardus Sententiae/jpeg'
     pdf_to_jpeg(pdf_path, output_folder)
 
     #delete page_1.jpeg and page_2.jpeg
-    os.remove('data/digitized versions/Vies des saints/jpeg/page_1.jpeg')
-    os.remove('data/digitized versions/Vies des saints/jpeg/page_2.jpeg')
+    os.remove('data/digitized versions/Petrus Lombardus Sententiae/jpeg/page_1.jpeg')
+    os.remove('data/digitized versions/Petrus Lombardus Sententiae/jpeg/page_2.jpeg')
