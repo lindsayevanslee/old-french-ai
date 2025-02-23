@@ -3,7 +3,7 @@ import numpy as np
 import os
 from pathlib import Path
 
-def generate_damage_mask(image_path, output_path, overlay_path, debug_dir, min_hole_area=3000):
+def generate_damage_mask(image_path, output_path, overlay_path, debug_dir, min_hole_area=5000):
     debug_dir.mkdir(parents=True, exist_ok=True)
     
     # Read the image
@@ -39,40 +39,46 @@ def generate_damage_mask(image_path, output_path, overlay_path, debug_dir, min_h
     cv2.drawContours(page_mask, [page_contour], -1, (255), -1)
     cv2.imwrite(str(debug_dir / "3_page_mask.jpg"), page_mask)
     
-    # Apply local adaptive threshold to get text and content
+    # Apply local adaptive threshold with more aggressive parameters
     adaptive_thresh = cv2.adaptiveThreshold(
         gray,
         255,
         cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
         cv2.THRESH_BINARY_INV,
-        25,  # Block size - reduced from original
-        5    # C constant - increased from original
+        45,  # Larger block size
+        12   # More aggressive C value
     )
     
-    # Apply page mask
+    # Apply page mask and save content mask
     content_mask = cv2.bitwise_and(adaptive_thresh, page_mask)
     cv2.imwrite(str(debug_dir / "4_content_mask.jpg"), content_mask)
     
-    # Calculate local density of content with smaller kernel
-    kernel_size = 25  # Reduced from 50
-    kernel = np.ones((kernel_size, kernel_size), np.uint8)
-    density = cv2.blur(content_mask, (kernel_size, kernel_size))
+    # Calculate local density with larger kernel
+    kernel_size = 99  # Changed to odd number
+    density = cv2.GaussianBlur(content_mask.astype(float), (kernel_size, kernel_size), 0)
+    
+    # Normalize density
+    density = (density / density.max() * 255).astype(np.uint8)
     cv2.imwrite(str(debug_dir / "5_density.jpg"), density)
     
-    # Threshold density with higher threshold
-    mean_density = np.mean(density[page_mask > 0])
-    _, damage_binary = cv2.threshold(density, mean_density * 0.5, 255, cv2.THRESH_BINARY_INV)  # Increased from 0.3
-    damage_binary = cv2.bitwise_and(damage_binary, page_mask)
+    # Create edge mask
+    edge_kernel = np.ones((25, 25), np.uint8)
+    edge_mask = cv2.morphologyEx(page_mask, cv2.MORPH_GRADIENT, edge_kernel)
+    cv2.imwrite(str(debug_dir / "6_edge_mask.jpg"), edge_mask)
     
-    # More aggressive cleanup of the damage mask
-    kernel_small = np.ones((3,3), np.uint8)
-    kernel_medium = np.ones((7,7), np.uint8)
+    # Threshold density more aggressively
+    _, damage_binary = cv2.threshold(density, 20, 255, cv2.THRESH_BINARY_INV)
+    damage_binary = cv2.bitwise_and(damage_binary, page_mask)
+    cv2.imwrite(str(debug_dir / "7_damage_binary.jpg"), damage_binary)
+    
+    # Clean up noise more aggressively
+    kernel_small = np.ones((7,7), np.uint8)
+    kernel_medium = np.ones((21,21), np.uint8)
     damage_binary = cv2.morphologyEx(damage_binary, cv2.MORPH_OPEN, kernel_small)
     damage_binary = cv2.morphologyEx(damage_binary, cv2.MORPH_CLOSE, kernel_medium)
-    damage_binary = cv2.morphologyEx(damage_binary, cv2.MORPH_OPEN, kernel_medium)
-    cv2.imwrite(str(debug_dir / "6_damage_binary.jpg"), damage_binary)
+    cv2.imwrite(str(debug_dir / "8_cleaned_binary.jpg"), damage_binary)
     
-    # Find and filter damage contours
+    # Find damage contours
     damage_contours, _ = cv2.findContours(damage_binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     
     # Create final mask and overlay
@@ -82,29 +88,30 @@ def generate_damage_mask(image_path, output_path, overlay_path, debug_dir, min_h
     for contour in damage_contours:
         area = cv2.contourArea(contour)
         if area > min_hole_area:
-            # Get bounding rectangle
-            x, y, w, h = cv2.boundingRect(contour)
-            aspect_ratio = float(w) / h if h > 0 else 0
-            
-            # Relaxed aspect ratio constraints
-            if 0.1 < aspect_ratio < 10:  # Wider range than before
-                cv2.drawContours(final_mask, [contour], -1, (255), -1)
-                cv2.drawContours(overlay, [contour], -1, (0, 0, 255), -1)
+            # Get contour center
+            M = cv2.moments(contour)
+            if M["m00"] != 0:
+                cx = int(M["m10"] / M["m00"])
+                cy = int(M["m01"] / M["m00"])
+                
+                # Check if point is near edge
+                if edge_mask[cy, cx] > 0 or np.any(edge_mask[max(0,cy-20):min(h,cy+20), max(0,cx-20):min(w,cx+20)] > 0):
+                    hull = cv2.convexHull(contour)
+                    cv2.drawContours(final_mask, [hull], -1, (255), -1)
+                    cv2.drawContours(overlay, [hull], -1, (0, 0, 255), -1)
     
-    # Final cleanup of the mask
+    # Final cleanup
     final_mask = cv2.morphologyEx(final_mask, cv2.MORPH_CLOSE, kernel_medium)
+    cv2.imwrite(str(debug_dir / "9_final_mask.jpg"), final_mask)
     
     # Create final overlay
     alpha = 0.5
     overlay_img = cv2.addWeighted(img, 1 - alpha, overlay, alpha, 0)
     
-    # Save outputs
-    cv2.imwrite(str(debug_dir / "7_final_mask.jpg"), final_mask)
     cv2.imwrite(str(output_path), final_mask)
     cv2.imwrite(str(overlay_path), overlay_img)
     
     return final_mask, overlay_img
-
 
 def process_folder():
     # Set up paths
@@ -114,17 +121,19 @@ def process_folder():
     overlay_dir = base_path / "overlays"
     debug_dir = base_path / "debug"
     
-    if not input_dir.exists():
-        print(f"Error: Input directory {input_dir} does not exist")
-        return
-        
-    for img_path in input_dir.glob("*.jpeg"):
+    # Create output directories
+    mask_dir.mkdir(parents=True, exist_ok=True)
+    overlay_dir.mkdir(parents=True, exist_ok=True)
+    debug_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Process all jpg files
+    for img_path in input_dir.glob("*.jp*g"):  # Handle both .jpg and .jpeg
         print(f"\nProcessing {img_path}")
         
         # Create debug directory for this image
         img_debug_dir = debug_dir / img_path.stem
-        mask_path = mask_dir / f"{img_path.stem}_mask.jpeg"
-        overlay_path = overlay_dir / f"{img_path.stem}_overlay.jpeg"
+        mask_path = mask_dir / f"{img_path.stem}_mask.jpg"
+        overlay_path = overlay_dir / f"{img_path.stem}_overlay.jpg"
         
         try:
             mask, overlay = generate_damage_mask(
@@ -133,6 +142,10 @@ def process_folder():
                 overlay_path,
                 img_debug_dir
             )
+            if mask is None:
+                print(f"Failed to process {img_path}")
+            else:
+                print(f"Successfully processed {img_path}")
         except Exception as e:
             print(f"Error processing {img_path}: {str(e)}")
 
