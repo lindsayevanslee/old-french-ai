@@ -3,7 +3,7 @@ import numpy as np
 import os
 from pathlib import Path
 
-def generate_damage_mask(image_path, output_path, overlay_path, debug_dir, min_hole_area=5000):
+def generate_damage_mask(image_path, output_path, overlay_path, debug_dir, min_hole_area=3000):
     debug_dir.mkdir(parents=True, exist_ok=True)
     
     # Read the image
@@ -45,30 +45,32 @@ def generate_damage_mask(image_path, output_path, overlay_path, debug_dir, min_h
         255,
         cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
         cv2.THRESH_BINARY_INV,
-        15,  # Block size
-        2    # C constant
+        25,  # Block size - reduced from original
+        5    # C constant - increased from original
     )
     
     # Apply page mask
     content_mask = cv2.bitwise_and(adaptive_thresh, page_mask)
     cv2.imwrite(str(debug_dir / "4_content_mask.jpg"), content_mask)
     
-    # Calculate local density of content
-    kernel_size = 50
+    # Calculate local density of content with smaller kernel
+    kernel_size = 25  # Reduced from 50
     kernel = np.ones((kernel_size, kernel_size), np.uint8)
     density = cv2.blur(content_mask, (kernel_size, kernel_size))
     cv2.imwrite(str(debug_dir / "5_density.jpg"), density)
     
-    # Threshold density to find areas with very little content
+    # Threshold density with higher threshold
     mean_density = np.mean(density[page_mask > 0])
-    _, damage_binary = cv2.threshold(density, mean_density * 0.3, 255, cv2.THRESH_BINARY_INV)
+    _, damage_binary = cv2.threshold(density, mean_density * 0.5, 255, cv2.THRESH_BINARY_INV)  # Increased from 0.3
     damage_binary = cv2.bitwise_and(damage_binary, page_mask)
-    cv2.imwrite(str(debug_dir / "6_damage_binary.jpg"), damage_binary)
     
-    # Clean up the damage mask
-    kernel = np.ones((5,5), np.uint8)
-    damage_binary = cv2.morphologyEx(damage_binary, cv2.MORPH_CLOSE, kernel)
-    damage_binary = cv2.morphologyEx(damage_binary, cv2.MORPH_OPEN, kernel)
+    # More aggressive cleanup of the damage mask
+    kernel_small = np.ones((3,3), np.uint8)
+    kernel_medium = np.ones((7,7), np.uint8)
+    damage_binary = cv2.morphologyEx(damage_binary, cv2.MORPH_OPEN, kernel_small)
+    damage_binary = cv2.morphologyEx(damage_binary, cv2.MORPH_CLOSE, kernel_medium)
+    damage_binary = cv2.morphologyEx(damage_binary, cv2.MORPH_OPEN, kernel_medium)
+    cv2.imwrite(str(debug_dir / "6_damage_binary.jpg"), damage_binary)
     
     # Find and filter damage contours
     damage_contours, _ = cv2.findContours(damage_binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -84,10 +86,13 @@ def generate_damage_mask(image_path, output_path, overlay_path, debug_dir, min_h
             x, y, w, h = cv2.boundingRect(contour)
             aspect_ratio = float(w) / h if h > 0 else 0
             
-            # Filter based on aspect ratio and position
-            if 0.2 < aspect_ratio < 5:
+            # Relaxed aspect ratio constraints
+            if 0.1 < aspect_ratio < 10:  # Wider range than before
                 cv2.drawContours(final_mask, [contour], -1, (255), -1)
                 cv2.drawContours(overlay, [contour], -1, (0, 0, 255), -1)
+    
+    # Final cleanup of the mask
+    final_mask = cv2.morphologyEx(final_mask, cv2.MORPH_CLOSE, kernel_medium)
     
     # Create final overlay
     alpha = 0.5
