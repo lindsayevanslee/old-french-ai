@@ -78,6 +78,7 @@ def generate_damage_mask(image_path, output_path, overlay_path, debug_dir, min_h
     damage_binary = cv2.morphologyEx(damage_binary, cv2.MORPH_CLOSE, kernel_medium)
     cv2.imwrite(str(debug_dir / "8_cleaned_binary.jpg"), damage_binary)
     
+    
     # Find damage contours
     damage_contours, _ = cv2.findContours(damage_binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     
@@ -88,19 +89,20 @@ def generate_damage_mask(image_path, output_path, overlay_path, debug_dir, min_h
     for contour in damage_contours:
         area = cv2.contourArea(contour)
         if area > min_hole_area:
-            # Get contour center
-            M = cv2.moments(contour)
-            if M["m00"] != 0:
-                cx = int(M["m10"] / M["m00"])
-                cy = int(M["m01"] / M["m00"])
-                
-                # Check if point is near edge
-                if edge_mask[cy, cx] > 0 or np.any(edge_mask[max(0,cy-20):min(h,cy+20), max(0,cx-20):min(w,cx+20)] > 0):
-                    hull = cv2.convexHull(contour)
-                    cv2.drawContours(final_mask, [hull], -1, (255), -1)
-                    cv2.drawContours(overlay, [hull], -1, (0, 0, 255), -1)
+            # Get bounding rectangle
+            x, y, w, h = cv2.boundingRect(contour)
+            
+            # Simplified checks:
+            # 1. Area check (already done)
+            # 2. Basic shape check (aspect ratio)
+            aspect_ratio = float(w) / h if h > 0 else 0
+            if 0.1 < aspect_ratio < 10:
+                # Draw the contour directly without additional filtering
+                cv2.drawContours(final_mask, [contour], -1, (255), -1)
+                cv2.drawContours(overlay, [contour], -1, (0, 0, 255), -1)
     
-    # Final cleanup
+    # Optional: One final cleanup pass to smooth edges
+    kernel_medium = np.ones((21,21), np.uint8)
     final_mask = cv2.morphologyEx(final_mask, cv2.MORPH_CLOSE, kernel_medium)
     cv2.imwrite(str(debug_dir / "9_final_mask.jpg"), final_mask)
     
