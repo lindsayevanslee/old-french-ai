@@ -39,25 +39,39 @@ def generate_damage_mask(image_path, output_path, overlay_path, debug_dir, min_h
     cv2.drawContours(page_mask, [page_contour], -1, (255), -1)
     cv2.imwrite(str(debug_dir / "3_page_mask.jpg"), page_mask)
     
-    # Get content mask (text and other dark elements)
-    _, content_binary = cv2.threshold(gray, background_color - 20, 255, cv2.THRESH_BINARY_INV)
-    content_binary = cv2.bitwise_and(content_binary, page_mask)
+    # Apply local adaptive threshold to get text and content
+    adaptive_thresh = cv2.adaptiveThreshold(
+        gray,
+        255,
+        cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+        cv2.THRESH_BINARY_INV,
+        15,  # Block size
+        2    # C constant
+    )
     
-    # Dilate the content to connect nearby elements
-    kernel = np.ones((5,5), np.uint8)
-    content_dilated = cv2.dilate(content_binary, kernel, iterations=2)
-    cv2.imwrite(str(debug_dir / "4_content_dilated.jpg"), content_dilated)
+    # Apply page mask
+    content_mask = cv2.bitwise_and(adaptive_thresh, page_mask)
+    cv2.imwrite(str(debug_dir / "4_content_mask.jpg"), content_mask)
     
-    # The damage mask is areas within the page but not near content
-    damage_mask = cv2.bitwise_and(page_mask, cv2.bitwise_not(content_dilated))
+    # Calculate local density of content
+    kernel_size = 50
+    kernel = np.ones((kernel_size, kernel_size), np.uint8)
+    density = cv2.blur(content_mask, (kernel_size, kernel_size))
+    cv2.imwrite(str(debug_dir / "5_density.jpg"), density)
+    
+    # Threshold density to find areas with very little content
+    mean_density = np.mean(density[page_mask > 0])
+    _, damage_binary = cv2.threshold(density, mean_density * 0.3, 255, cv2.THRESH_BINARY_INV)
+    damage_binary = cv2.bitwise_and(damage_binary, page_mask)
+    cv2.imwrite(str(debug_dir / "6_damage_binary.jpg"), damage_binary)
     
     # Clean up the damage mask
-    kernel = np.ones((3,3), np.uint8)
-    damage_mask = cv2.morphologyEx(damage_mask, cv2.MORPH_OPEN, kernel)
-    cv2.imwrite(str(debug_dir / "5_damage_mask_initial.jpg"), damage_mask)
+    kernel = np.ones((5,5), np.uint8)
+    damage_binary = cv2.morphologyEx(damage_binary, cv2.MORPH_CLOSE, kernel)
+    damage_binary = cv2.morphologyEx(damage_binary, cv2.MORPH_OPEN, kernel)
     
     # Find and filter damage contours
-    damage_contours, _ = cv2.findContours(damage_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    damage_contours, _ = cv2.findContours(damage_binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     
     # Create final mask and overlay
     final_mask = np.zeros_like(gray)
@@ -66,14 +80,12 @@ def generate_damage_mask(image_path, output_path, overlay_path, debug_dir, min_h
     for contour in damage_contours:
         area = cv2.contourArea(contour)
         if area > min_hole_area:
-            # Get the average intensity in this region
-            mask = np.zeros_like(gray)
-            cv2.drawContours(mask, [contour], -1, (255), -1)
-            region = cv2.bitwise_and(gray, mask)
-            avg_intensity = cv2.mean(gray, mask=mask)[0]
+            # Get bounding rectangle
+            x, y, w, h = cv2.boundingRect(contour)
+            aspect_ratio = float(w) / h if h > 0 else 0
             
-            # Only include if the intensity is close to background color
-            if abs(avg_intensity - background_color) < 30:
+            # Filter based on aspect ratio and position
+            if 0.2 < aspect_ratio < 5:
                 cv2.drawContours(final_mask, [contour], -1, (255), -1)
                 cv2.drawContours(overlay, [contour], -1, (0, 0, 255), -1)
     
@@ -81,12 +93,8 @@ def generate_damage_mask(image_path, output_path, overlay_path, debug_dir, min_h
     alpha = 0.5
     overlay_img = cv2.addWeighted(img, 1 - alpha, overlay, alpha, 0)
     
-    # Save final outputs
-    cv2.imwrite(str(debug_dir / "6_final_mask.jpg"), final_mask)
-    
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    overlay_path.parent.mkdir(parents=True, exist_ok=True)
-    
+    # Save outputs
+    cv2.imwrite(str(debug_dir / "7_final_mask.jpg"), final_mask)
     cv2.imwrite(str(output_path), final_mask)
     cv2.imwrite(str(overlay_path), overlay_img)
     
