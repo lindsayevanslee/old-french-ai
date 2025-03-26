@@ -14,8 +14,8 @@ import time
 #output prints to data/digitized versions/Estoire du Graal - Merlin en prose -Suite Vulgate/mask_methods/combined_approach
 
 # Import functions from both approaches
-from rgb_damage_detection import detect_damage_rgb
-from generate_damage_masks import generate_damage_mask
+from generate_masks_rgb import detect_damage_rgb
+from generate_masks_damage import generate_damage_mask
 
 def create_directory(directory_path):
     """Create directory if it doesn't exist"""

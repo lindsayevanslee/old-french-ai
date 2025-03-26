@@ -6,7 +6,7 @@ from tqdm import tqdm
 import argparse
 from pathlib import Path
 
-#output prints to folder "data/digitized versions/Estoire du Graal - Merlin en prose -Suite Vulgate/mask_methods/damage_masks"
+#output prints to folder "data/digitized versions/Estoire du Graal - Merlin en prose -Suite Vulgate/mask_methods/damage"
 
 def generate_damage_mask(image_path, masks_dir, overlays_dir, debug_dir=None):
     """
@@ -293,7 +293,7 @@ def main():
     
     args = parser.parse_args()
 
-    output_dir = "data/digitized versions/Estoire du Graal - Merlin en prose -Suite Vulgate/mask_methods/damage_masks"
+    output_dir = "data/digitized versions/Estoire du Graal - Merlin en prose -Suite Vulgate/mask_methods/damage"
     
     if args.single:
         if not os.path.isfile(args.single):
