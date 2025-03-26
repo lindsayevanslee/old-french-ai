@@ -6,182 +6,159 @@ from tqdm import tqdm
 import argparse
 from pathlib import Path
 
-def generate_damage_mask(image_path, mask_dir, overlay_dir, debug_dir):
+def generate_damage_mask(image_path, masks_dir, overlays_dir, debug_dir=None):
     """
-    Generate a damage mask for a manuscript page
+    Generate a binary mask highlighting damaged areas in a manuscript image.
     
     Args:
         image_path: Path to the input image
-        mask_dir: Directory to save the output mask
-        overlay_dir: Directory to save the overlay visualization
-        debug_dir: Directory to save debug images
-    
+        masks_dir: Directory to save the output mask
+        overlays_dir: Directory to save the overlay image
+        debug_dir: Directory to save debug images (None to disable debug output)
+        
     Returns:
         Tuple of (mask_path, overlay_path)
     """
-    # Convert paths to Path objects if they're strings
+    # Create output directories if they don't exist
+    os.makedirs(masks_dir, exist_ok=True)
+    os.makedirs(overlays_dir, exist_ok=True)
+    
+    # Convert paths to Path objects
     image_path = Path(image_path)
-    mask_dir = Path(mask_dir)
-    overlay_dir = Path(overlay_dir)
-    debug_dir = Path(debug_dir)
+    masks_dir = Path(masks_dir)
+    overlays_dir = Path(overlays_dir)
     
-    # Create output directories
-    mask_dir.mkdir(parents=True, exist_ok=True)
-    overlay_dir.mkdir(parents=True, exist_ok=True)
-    debug_dir.mkdir(parents=True, exist_ok=True)
+    # Only convert debug_dir to Path if it's not None
+    if debug_dir is not None:
+        debug_dir = Path(debug_dir)
+        os.makedirs(debug_dir, exist_ok=True)
     
-    # Read the image
-    original = cv2.imread(str(image_path))
-    if original is None:
-        print(f"Error: Could not read image {image_path}")
-        return None, None
+    # Read the input image
+    image = cv2.imread(str(image_path))
+    if image is None:
+        raise ValueError(f"Could not read image: {image_path}")
     
-    # Convert to grayscale
-    gray = cv2.cvtColor(original, cv2.COLOR_BGR2GRAY)
+    # Extract the filename without extension
+    filename = image_path.stem
     
-    # Get dimensions
-    height, width = gray.shape
+    # Step 1: Convert to grayscale
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    if debug_dir:
+        cv2.imwrite(str(debug_dir / "2_grayscale.jpg"), gray)
     
-    # Save debug images
-    cv2.imwrite(str(debug_dir / "1_original.jpg"), original)
-    cv2.imwrite(str(debug_dir / "2_grayscale.jpg"), gray)
+    # Step 2: Apply adaptive thresholding to identify text regions
+    adaptive_thresh = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
+                                           cv2.THRESH_BINARY_INV, 11, 2)
+    if debug_dir:
+        cv2.imwrite(str(debug_dir / "3_adaptive_thresh.jpg"), adaptive_thresh)
     
-    # 1. Apply adaptive thresholding to identify text regions
-    adaptive_thresh = cv2.adaptiveThreshold(
-        gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 11, 2
-    )
-    cv2.imwrite(str(debug_dir / "3_adaptive_thresh.jpg"), adaptive_thresh)
-    
-    # 2. Find text regions using contours
+    # Step 3: Find contours to identify text regions
     contours, _ = cv2.findContours(adaptive_thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     
-    # Create a mask for the content area
-    content_mask = np.zeros((height, width), dtype=np.uint8)
-    
-    # Filter contours by area and draw the largest ones
-    min_area = 500  # Minimum area to be considered a text region
-    text_regions = []
+    # Create a mask for text regions
+    content_mask = np.zeros_like(gray)
+    min_area = 500  # Minimum area for text regions
     
     for contour in contours:
         area = cv2.contourArea(contour)
         if area > min_area:
-            x, y, w, h = cv2.boundingRect(contour)
-            text_regions.append((x, y, w, h, area))
+            cv2.drawContours(content_mask, [contour], -1, 255, -1)
     
-    # Sort by area (largest first)
-    text_regions.sort(key=lambda x: x[4], reverse=True)
+    if debug_dir:
+        cv2.imwrite(str(debug_dir / "4_content_mask.jpg"), content_mask)
     
-    # Draw all text regions to create a comprehensive content mask
-    for x, y, w, h, area in text_regions:
-        cv2.rectangle(content_mask, (x, y), (x+w, y+h), 255, -1)
+    # Step 4: Calculate local density
+    kernel_size = 25
+    kernel = np.ones((kernel_size, kernel_size), np.uint8)
+    density = cv2.filter2D(gray, -1, kernel / (kernel_size * kernel_size))
+    if debug_dir:
+        cv2.imwrite(str(debug_dir / "5_density.jpg"), density)
     
-    # Dilate the content mask to include surrounding areas
-    kernel = np.ones((20, 20), np.uint8)
-    content_mask = cv2.dilate(content_mask, kernel, iterations=1)
-    cv2.imwrite(str(debug_dir / "4_content_mask.jpg"), content_mask)
+    # Threshold density to identify areas with unusual density
+    _, density_binary = cv2.threshold(density, 200, 255, cv2.THRESH_BINARY_INV)
+    if debug_dir:
+        cv2.imwrite(str(debug_dir / "6_density_binary.jpg"), density_binary)
     
-    # 3. Apply local density analysis with a smaller kernel
-    kernel_size = 25  # Smaller kernel to capture more local details
-    kernel = np.ones((kernel_size, kernel_size), np.float32) / (kernel_size * kernel_size)
-    density = cv2.filter2D(gray, -1, kernel)
-    
-    # Normalize density for visualization
-    density_normalized = cv2.normalize(density, None, 0, 255, cv2.NORM_MINMAX)
-    cv2.imwrite(str(debug_dir / "5_density.jpg"), density_normalized)
-    
-    # 4. Create binary mask for low density areas (potential damage)
-    # Use a threshold based on the mean density of the image
-    density_threshold = np.mean(density) * 0.95  # Slightly below mean
-    
-    # Create binary mask for pixels with density below threshold
-    density_binary = np.zeros_like(gray, dtype=np.uint8)
-    density_binary[density < density_threshold] = 255
-    cv2.imwrite(str(debug_dir / "6_density_binary.jpg"), density_binary)
-    
-    # 5. Analyze local contrast (texture)
-    kernel_size = 5
+    # Step 5: Calculate local contrast
     blur = cv2.GaussianBlur(gray, (kernel_size, kernel_size), 0)
     local_contrast = cv2.absdiff(gray, blur)
+    if debug_dir:
+        cv2.imwrite(str(debug_dir / "7_local_contrast.jpg"), local_contrast)
     
-    # Normalize for visualization
-    contrast_normalized = cv2.normalize(local_contrast, None, 0, 255, cv2.NORM_MINMAX)
-    cv2.imwrite(str(debug_dir / "7_local_contrast.jpg"), contrast_normalized)
+    # Threshold local contrast to identify areas with unusual texture
+    _, contrast_binary = cv2.threshold(local_contrast, 15, 255, cv2.THRESH_BINARY)
+    if debug_dir:
+        cv2.imwrite(str(debug_dir / "8_contrast_binary.jpg"), contrast_binary)
     
-    # Find contrast threshold based on image statistics
-    contrast_threshold = np.mean(local_contrast) * 0.5  # Half of mean contrast
+    # Step 6: Combine density and contrast masks
+    combined_mask = cv2.bitwise_or(density_binary, contrast_binary)
+    if debug_dir:
+        cv2.imwrite(str(debug_dir / "9_combined_mask.jpg"), combined_mask)
     
-    # Create binary mask for low contrast areas (potential damage)
-    contrast_binary = np.zeros_like(gray, dtype=np.uint8)
-    contrast_binary[local_contrast < contrast_threshold] = 255
-    cv2.imwrite(str(debug_dir / "8_contrast_binary.jpg"), contrast_binary)
+    # Step 7: Analyze color (saturation)
+    hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+    saturation = hsv[:, :, 1]
     
-    # 6. Combine density and contrast masks
-    combined_mask = cv2.bitwise_and(density_binary, contrast_binary)
-    cv2.imwrite(str(debug_dir / "9_combined_mask.jpg"), combined_mask)
+    # Threshold saturation to identify areas with low saturation (often damaged)
+    _, saturation_binary = cv2.threshold(saturation, 30, 255, cv2.THRESH_BINARY_INV)
+    if debug_dir:
+        cv2.imwrite(str(debug_dir / "10_saturation_binary.jpg"), saturation_binary)
     
-    # 7. Apply color analysis in HSV space for additional features
-    hsv = cv2.cvtColor(original, cv2.COLOR_BGR2HSV)
-    h, s, v = cv2.split(hsv)
+    # Step 8: Create initial damage mask
+    initial_damage_mask = cv2.bitwise_and(combined_mask, saturation_binary)
+    if debug_dir:
+        cv2.imwrite(str(debug_dir / "11_initial_damage_mask.jpg"), initial_damage_mask)
     
-    # Analyze saturation
-    saturation_threshold = np.mean(s) * 0.8  # 80% of mean saturation
-    
-    # Create binary mask for areas with low saturation
-    saturation_binary = np.zeros_like(gray, dtype=np.uint8)
-    saturation_binary[s < saturation_threshold] = 255
-    cv2.imwrite(str(debug_dir / "10_saturation_binary.jpg"), saturation_binary)
-    
-    # 8. Combine with content mask and all other features
-    initial_damage_mask = cv2.bitwise_and(combined_mask, content_mask)
-    initial_damage_mask = cv2.bitwise_and(initial_damage_mask, saturation_binary)
-    cv2.imwrite(str(debug_dir / "11_initial_damage_mask.jpg"), initial_damage_mask)
-    
-    # 9. Apply morphological operations to clean up the mask
+    # Step 9: Apply morphological operations to clean up the mask
     kernel = np.ones((3, 3), np.uint8)
-    damage_mask = cv2.morphologyEx(initial_damage_mask, cv2.MORPH_OPEN, kernel)
-    damage_mask = cv2.morphologyEx(damage_mask, cv2.MORPH_CLOSE, kernel)
-    cv2.imwrite(str(debug_dir / "12_morphology.jpg"), damage_mask)
+    morphology = cv2.morphologyEx(initial_damage_mask, cv2.MORPH_CLOSE, kernel)
+    morphology = cv2.morphologyEx(morphology, cv2.MORPH_OPEN, kernel)
+    if debug_dir:
+        cv2.imwrite(str(debug_dir / "12_morphology.jpg"), morphology)
     
-    # 10. Filter small regions
-    contours, _ = cv2.findContours(damage_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    filtered_mask = np.zeros_like(damage_mask)
+    # Step 10: Filter out small regions
+    # Find connected components
+    num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(morphology, connectivity=8)
     
-    min_damage_area = 100  # Minimum area to be considered damage
-    for contour in contours:
-        area = cv2.contourArea(contour)
-        if area > min_damage_area:
-            cv2.drawContours(filtered_mask, [contour], 0, 255, -1)
+    # Filter out small components
+    min_damage_area = 100
+    filtered_mask = np.zeros_like(morphology)
     
-    cv2.imwrite(str(debug_dir / "13_filtered_mask.jpg"), filtered_mask)
+    # Start from 1 to skip the background label
+    for i in range(1, num_labels):
+        if stats[i, cv2.CC_STAT_AREA] >= min_damage_area:
+            filtered_mask[labels == i] = 255
     
-    # 11. Apply intensity-based filtering
-    intensity_threshold = np.mean(gray) * 0.95  # 95% of mean intensity
+    if debug_dir:
+        cv2.imwrite(str(debug_dir / "13_filtered_mask.jpg"), filtered_mask)
     
-    # Create a mask for areas with intensity below threshold
-    intensity_mask = np.zeros_like(gray, dtype=np.uint8)
-    intensity_mask[gray < intensity_threshold] = 255
-    cv2.imwrite(str(debug_dir / "14_intensity_mask.jpg"), intensity_mask)
+    # Step 11: Add intensity-based damage detection
+    # Areas that are significantly darker or lighter than the average
+    intensity_threshold = 50
+    avg_intensity = np.mean(gray)
     
-    # 12. Combine filtered mask with intensity mask
-    final_mask = cv2.bitwise_or(filtered_mask, cv2.bitwise_and(intensity_mask, content_mask))
-    cv2.imwrite(str(debug_dir / "15_final_mask.jpg"), final_mask)
+    intensity_mask = np.zeros_like(gray)
+    intensity_mask[(gray < avg_intensity - intensity_threshold) | 
+                  (gray > avg_intensity + intensity_threshold)] = 255
     
-    # 13. Apply a final cleanup with morphological operations
-    kernel = np.ones((5, 5), np.uint8)
-    final_mask = cv2.morphologyEx(final_mask, cv2.MORPH_CLOSE, kernel)
-    final_mask = cv2.morphologyEx(final_mask, cv2.MORPH_OPEN, kernel)
+    if debug_dir:
+        cv2.imwrite(str(debug_dir / "14_intensity_mask.jpg"), intensity_mask)
     
-    # Create overlay visualization
-    overlay = original.copy()
-    # Add red tint to damaged areas
-    overlay[final_mask > 0] = (0, 0, 255)  # Red color for damaged areas
-    # Blend with original image
-    alpha = 0.5
-    overlay = cv2.addWeighted(original, 1-alpha, overlay, alpha, 0)
+    # Step 12: Combine with the filtered mask
+    final_mask = cv2.bitwise_or(filtered_mask, intensity_mask)
     
-    # Save the final mask and overlay
-    mask_path = mask_dir / f"{image_path.stem}_mask.jpg"
-    overlay_path = overlay_dir / f"{image_path.stem}_overlay.jpg"
+    # Save the original image for debug
+    if debug_dir:
+        cv2.imwrite(str(debug_dir / "1_original.jpg"), image)
+        cv2.imwrite(str(debug_dir / "15_final_mask.jpg"), final_mask)
+    
+    # Create an overlay image
+    overlay = image.copy()
+    overlay[final_mask > 0] = [0, 0, 255]  # Red color for damaged areas
+    
+    # Save the mask and overlay
+    mask_path = masks_dir / f"{filename}_mask.jpg"
+    overlay_path = overlays_dir / f"{filename}_overlay.jpg"
     
     cv2.imwrite(str(mask_path), final_mask)
     cv2.imwrite(str(overlay_path), overlay)
