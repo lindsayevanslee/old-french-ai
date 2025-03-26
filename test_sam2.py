@@ -15,6 +15,8 @@ Installation instructions: https://github.com/facebookresearch/sam2?tab=readme-o
 Clone the sam2 repo in the same parent directory as this repo, not within this repo
 
 Example notebook: https://github.com/facebookresearch/sam2/blob/main/notebooks/automatic_mask_generator_example.ipynb
+
+Automatic mask generation function with documentation about the parameters: https://github.com/facebookresearch/sam2/blob/main/sam2/automatic_mask_generator.py
 """
 
 
@@ -75,7 +77,19 @@ model_cfg = "configs/sam2.1/sam2.1_hiera_l.yaml"
 #generate masks
 sam2 = build_sam2(model_cfg, sam2_checkpoint, device=device, apply_postprocessing=False)
 
-mask_generator = SAM2AutomaticMaskGenerator(sam2)
+# mask_generator = SAM2AutomaticMaskGenerator(sam2)
+
+mask_generator = SAM2AutomaticMaskGenerator(
+    model = sam2,
+    points_per_side=48,           # Increased from default 32 for finer sampling
+    points_per_batch = 16,
+    pred_iou_thresh=0.7,          # Lowered from 0.8 to be more permissive
+    stability_score_thresh=0.85,  # Lowered from 0.95 to detect more features
+    stability_score_offset=0.8,   # Slightly lower than default
+    crop_n_layers=1,              # Add 1 layer of cropping for detail
+    box_nms_thresh=0.6,           # Lowered to reduce overlapping masks
+    min_mask_region_area=400,     # Set minimum area to avoid tiny segments
+)
 
 masks = mask_generator.generate(image)
 
@@ -91,3 +105,16 @@ output_path = "data/page_13_sam2_masks.png"
 plt.savefig(output_path, bbox_inches='tight', pad_inches=0)
 plt.close()
 print(f"Annotated image saved to {output_path}")
+
+
+all_masks = [
+    mask['segmentation']
+    for mask
+    in sorted(masks, key=lambda x: x['area'], reverse=True)
+]
+
+# Save all masks as images
+for i, mask in enumerate(all_masks):
+    output_mask_path = f"data/page_13_sam2_mask_{i + 1}.png"
+    plt.imsave(output_mask_path, mask, cmap='gray')
+    print(f"Mask {i + 1} saved to {output_mask_path}")
