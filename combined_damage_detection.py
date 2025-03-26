@@ -11,6 +11,8 @@ import sys
 import importlib.util
 import time
 
+#output prints to data/digitized versions/Estoire du Graal - Merlin en prose -Suite Vulgate/mask_methods/combined_approach
+
 # Import functions from both approaches
 from rgb_damage_detection import detect_damage_rgb
 from generate_damage_masks import generate_damage_mask
@@ -21,7 +23,7 @@ def create_directory(directory_path):
         os.makedirs(directory_path)
         print(f"Created directory: {directory_path}")
 
-def combined_damage_detection(image_path, output_dir="data/combined_approach", debug=True):
+def combined_damage_detection(image_path, output_dir="data/digitized versions/Estoire du Graal - Merlin en prose -Suite Vulgate/mask_methods/combined_approach", debug=True):
     """
     Combine the original and RGB-based approaches for damage detection
     
@@ -281,7 +283,7 @@ def main():
     
     parser = argparse.ArgumentParser(description="Combined damage detection for manuscript images")
     parser.add_argument("--input_dir", type=str, help="Directory containing input images")
-    parser.add_argument("--output_dir", type=str, default="data/combined_approach", 
+    parser.add_argument("--output_dir", type=str, default="data/digitized versions/Estoire du Graal - Merlin en prose -Suite Vulgate/mask_methods/combined_approach", 
                         help="Directory to save output images")
     parser.add_argument("--single", type=str, help="Process a single image")
     parser.add_argument("--no_debug", action="store_true", help="Disable debug images")

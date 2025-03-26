@@ -3,6 +3,8 @@ import numpy as np
 import os
 from pathlib import Path
 
+#output prints to folder: data/digitized versions/Estoire du Graal - Merlin en prose -Suite Vulgate/mask_methods/first_try
+
 def generate_damage_mask(image_path, output_path, overlay_path, debug_dir, min_hole_area=5000):
     debug_dir.mkdir(parents=True, exist_ok=True)
     
@@ -280,9 +282,9 @@ def process_folder():
     # Set up paths
     base_path = Path("data/digitized versions/Estoire du Graal - Merlin en prose -Suite Vulgate")
     input_dir = base_path / "jpeg"
-    mask_dir = base_path / "masks"
-    overlay_dir = base_path / "overlays"
-    debug_dir = base_path / "debug"
+    mask_dir = base_path / "mask_methods/first_try/masks"
+    overlay_dir = base_path / "mask_methods/first_try/overlays"
+    debug_dir = base_path / "mask_methods/first_try/debug"
     
     # Create output directories
     mask_dir.mkdir(parents=True, exist_ok=True)

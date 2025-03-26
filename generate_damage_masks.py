@@ -6,6 +6,8 @@ from tqdm import tqdm
 import argparse
 from pathlib import Path
 
+#output prints to folder "data/digitized versions/Estoire du Graal - Merlin en prose -Suite Vulgate/mask_methods/damage_masks"
+
 def generate_damage_mask(image_path, masks_dir, overlays_dir, debug_dir=None):
     """
     Generate a binary mask highlighting damaged areas in a manuscript image.
@@ -290,6 +292,8 @@ def main():
     parser.add_argument("--single", "-s", help="Process a single image instead of a directory")
     
     args = parser.parse_args()
+
+    output_dir = "data/digitized versions/Estoire du Graal - Merlin en prose -Suite Vulgate/mask_methods/damage_masks"
     
     if args.single:
         if not os.path.isfile(args.single):
@@ -297,7 +301,7 @@ def main():
             return
         
         print(f"Processing single image: {args.single}")
-        process_single_image(args.single, args.output)
+        process_single_image(args.single, output_dir)
     else:
         # If no input directory is specified, use the same one as generate_masks.py
         input_dir = args.input
@@ -311,7 +315,7 @@ def main():
             return
         
         print(f"Processing directory: {input_dir}")
-        process_directory(input_dir, args.output)
+        process_directory(input_dir, output_dir)
 
 if __name__ == "__main__":
     main() 

@@ -8,6 +8,8 @@ import os
 import matplotlib.pyplot as plt
 from pathlib import Path
 
+#output prints to data/digitized versions/Estoire du Graal - Merlin en prose -Suite Vulgate/mask_methods/rbg
+
 def create_directory(directory_path):
     """Create directory if it doesn't exist"""
     if not os.path.exists(directory_path):
@@ -225,7 +227,7 @@ def detect_damage_rgb(image_path, output_dir):
 def main():
     # Define input and output directories
     input_dir = "data/digitized versions/Estoire du Graal - Merlin en prose -Suite Vulgate/jpeg"
-    output_dir = "data/rgb_damage_detection"
+    output_dir = "data/digitized versions/Estoire du Graal - Merlin en prose -Suite Vulgate/mask_methods/rbg"
     
     # Create output directory
     create_directory(output_dir)
