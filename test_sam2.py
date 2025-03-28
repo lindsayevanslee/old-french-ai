@@ -19,6 +19,8 @@ Example notebook: https://github.com/facebookresearch/sam2/blob/main/notebooks/a
 Automatic mask generation function with documentation about the parameters: https://github.com/facebookresearch/sam2/blob/main/sam2/automatic_mask_generator.py
 """
 
+input_image_path = 'data/page_20.jpeg'
+
 
 # select the device for computation
 if torch.cuda.is_available():
@@ -67,7 +69,7 @@ def show_anns(anns, borders=True):
     ax.imshow(img)
 
 #load sample image
-image = Image.open('data/page_13.jpeg')
+image = Image.open(input_image_path)
 image = np.array(image.convert("RGB"))
 
 #paths to model checkpoints and configuration
@@ -81,14 +83,14 @@ sam2 = build_sam2(model_cfg, sam2_checkpoint, device=device, apply_postprocessin
 
 mask_generator = SAM2AutomaticMaskGenerator(
     model = sam2,
-    points_per_side=48,           # Increased from default 32 for finer sampling
+    points_per_side=32,           # Reduced to focus on larger features
     points_per_batch = 16,
-    pred_iou_thresh=0.7,          # Lowered from 0.8 to be more permissive
-    stability_score_thresh=0.85,  # Lowered from 0.95 to detect more features
-    stability_score_offset=0.8,   # Slightly lower than default
-    crop_n_layers=1,              # Add 1 layer of cropping for detail
-    box_nms_thresh=0.6,           # Lowered to reduce overlapping masks
-    min_mask_region_area=400,     # Set minimum area to avoid tiny segments
+    pred_iou_thresh=0.6,          # Increased to be more selective
+    stability_score_thresh=0.8,   # Increased to be more selective
+    stability_score_offset=0.7,   # Increased to be more selective
+    crop_n_layers=1,
+    box_nms_thresh=0.7,           # Increased to reduce overlapping masks
+    min_mask_region_area=5000,    # Significantly increased to focus on large regions only
 )
 
 masks = mask_generator.generate(image)
@@ -101,7 +103,7 @@ plt.figure(figsize=(20, 20))
 plt.imshow(image)
 show_anns(masks)
 plt.axis('off')
-output_path = "data/page_13_sam2_masks.png"
+output_path = f"data/{input_image_path.split('/')[-1]}_sam2_masks.png"
 plt.savefig(output_path, bbox_inches='tight', pad_inches=0)
 plt.close()
 print(f"Annotated image saved to {output_path}")
@@ -115,6 +117,6 @@ all_masks = [
 
 # Save all masks as images
 for i, mask in enumerate(all_masks):
-    output_mask_path = f"data/page_13_sam2_mask_{i + 1}.png"
+    output_mask_path = f"data/{input_image_path.split('/')[-1]}_sam2_mask_{i + 1}.png"
     plt.imsave(output_mask_path, mask, cmap='gray')
     print(f"Mask {i + 1} saved to {output_mask_path}")
