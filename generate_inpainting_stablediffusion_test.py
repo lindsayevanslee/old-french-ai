@@ -34,7 +34,7 @@ input_image_path = 'data/page_20.jpeg'
 input_mask_path = 'data/page_20_sam2_mask_4.png' 
 
 # Define prompt
-prompt = "text of medieval manuscript"
+prompt = "text of medieval manuscript, respecting page margins and column layout on all sides, maintaining consistent text height with surrounding columns, following the same vertical alignment as existing text"
 
 try:
     # Load the images
@@ -60,8 +60,9 @@ try:
         mask_image=mask_image,
         height=new_height,
         width=new_width,
-        num_inference_steps=50,  # Increased for better quality
-        guidance_scale=7.5,      # Standard guidance scale
+        num_inference_steps=50,    # Increased for better quality
+        guidance_scale=7.5,       # Increased to be more strict about following layout
+        negative_prompt="text extending beyond margins, text not aligned with columns, inconsistent text height, text going past the bottom margin",  # Added negative prompt
     )
     inpainted_image = result.images[0]
     
