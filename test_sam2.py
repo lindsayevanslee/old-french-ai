@@ -103,7 +103,7 @@ plt.figure(figsize=(20, 20))
 plt.imshow(image)
 show_anns(masks)
 plt.axis('off')
-output_path = f"data/{input_image_path.split('/')[-1]}_sam2_masks.png"
+output_path = f"data/{input_image_path.split('/')[-1].replace('.jpeg', '')}_sam2_masks.png"
 plt.savefig(output_path, bbox_inches='tight', pad_inches=0)
 plt.close()
 print(f"Annotated image saved to {output_path}")
@@ -117,6 +117,6 @@ all_masks = [
 
 # Save all masks as images
 for i, mask in enumerate(all_masks):
-    output_mask_path = f"data/{input_image_path.split('/')[-1]}_sam2_mask_{i + 1}.png"
+    output_mask_path = f"data/{input_image_path.split('/')[-1].replace('.jpeg', '')}_sam2_mask_{i + 1}.png"
     plt.imsave(output_mask_path, mask, cmap='gray')
     print(f"Mask {i + 1} saved to {output_mask_path}")
