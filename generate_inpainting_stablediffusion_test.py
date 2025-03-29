@@ -24,7 +24,7 @@ def scale_image_to_max_dimension(image, max_dimension=1024):
 
 # Load the inpainting pipeline
 pipeline = StableDiffusionInpaintPipeline.from_pretrained(
-    "runwayml/stable-diffusion-inpainting",
+    "runwayml/stable-diffusion-inpainting",  # Back to the original inpainting model
     torch_dtype=torch.float16,
 )
 pipeline = pipeline.to("cuda")
@@ -34,7 +34,16 @@ input_image_path = 'data/page_20.jpeg'
 input_mask_path = 'data/page_20_sam2_mask_4.png' 
 
 # Define prompt
-prompt = "text of medieval manuscript, respecting page margins and column layout on all sides, maintaining consistent text height with surrounding columns, following the same vertical alignment as existing text"
+prompt = """medieval manuscript text, two-column layout, precise margins, 
+text aligned with existing columns, exact same text height as surrounding text, 
+respecting bottom margin, maintaining consistent line spacing, 
+text stopping at the same height as the second column"""
+
+# Define negative prompt
+negative_prompt = """text extending past bottom margin, text going beyond column boundaries,
+text not aligned with existing columns, inconsistent line height, 
+text continuing past the last line of the second column,
+text extending beyond the page margins, text not respecting layout"""
 
 try:
     # Load the images
@@ -61,8 +70,8 @@ try:
         height=new_height,
         width=new_width,
         num_inference_steps=50,    # Increased for better quality
-        guidance_scale=7.5,       # Increased to be more strict about following layout
-        negative_prompt="text extending beyond margins, text not aligned with columns, inconsistent text height, text going past the bottom margin",  # Added negative prompt
+        guidance_scale=8.5,        # Moderate guidance scale
+        negative_prompt=negative_prompt,
     )
     inpainted_image = result.images[0]
     
