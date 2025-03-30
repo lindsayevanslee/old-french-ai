@@ -30,25 +30,52 @@ pipeline = StableDiffusionInpaintPipeline.from_pretrained(
 pipeline = pipeline.to("cuda")
 
 # Define input paths
-input_image_path = 'data/page_20.jpeg'
-input_mask_path = 'data/page_20_sam2_mask_4.png' 
+# input_image_path = 'data/digitized versions/Estoire du Graal - Merlin en prose -Suite Vulgate/page_20.jpeg'
+# input_mask_path = 'data/digitized versions/Estoire du Graal - Merlin en prose -Suite Vulgate/page_20_sam2_mask_4.png' 
+
+# input_image_path = 'data/digitized versions/Manuscrits numerises de la Bibliotheque municipale de Toulouse/page_37.jpeg'
+# input_mask_path = 'data/digitized versions/Manuscrits numerises de la Bibliotheque municipale de Toulouse/page_37_sam2_mask_2.png' 
+
+input_image_path = 'data/digitized versions/Manuscrits numerises de la Bibliotheque municipale de Toulouse/page_120.jpeg'
+input_mask_path = 'data/digitized versions/Manuscrits numerises de la Bibliotheque municipale de Toulouse/page_120_sam2_mask_7.png' 
+
 
 # Define prompt
-prompt = """medieval manuscript text, two-column layout, precise margins, 
-text aligned with existing columns, exact same text height as surrounding text, 
-respecting bottom margin, maintaining consistent line spacing, 
-text stopping at the same height as the second column"""
+# prompt = """medieval manuscript text, two-column layout, precise margins, 
+# text aligned with existing columns, exact same text height as surrounding text, 
+# respecting bottom margin, maintaining consistent line spacing, 
+# text stopping at the same height as the second column"""
+
+prompt = """medieval illumination style figure drawing, three distinct human figures in brown Benedictine habits,
+monks seated at wooden table studying manuscript, clear faces with tonsured heads and beards,
+detailed medieval clothing with flowing robes and hoods, figures interacting with the book,
+painted in flat medieval art style with strong outlines, muted earth tones and rich jewel colors,
+composition similar to medieval manuscript illustrations, figures arranged in triangular composition,
+architectural details of stone arches and columns in background"""
+
+
 
 # Define negative prompt
-negative_prompt = """text extending past bottom margin, text going beyond column boundaries,
-text not aligned with existing columns, inconsistent line height, 
-text continuing past the last line of the second column,
-text extending beyond the page margins, text not respecting layout"""
+# negative_prompt = """text extending past bottom margin, text going beyond column boundaries,
+# text not aligned with existing columns, inconsistent line height, 
+# text continuing past the last line of the second column,
+# text extending beyond the page margins, text not respecting layout"""
+
+negative_prompt = """abstract shapes, decorative patterns without figures, incomplete human forms,
+modern art style, photorealism, digital art effects, anime or cartoon style,
+missing faces or bodies, floating elements, unclear figures,
+modern clothing or accessories, contemporary setting,
+oversaturated colors, blurry details, missing architectural elements"""
+
 
 try:
     # Load the images
     init_image = Image.open(input_image_path).convert("RGB")
     mask_image = Image.open(input_mask_path).convert("RGB")
+    
+    # Get the directory path from input image
+    output_dir = os.path.dirname(input_image_path)
+    base_filename = os.path.splitext(os.path.basename(input_image_path))[0]
     
     # First scale down if needed
     new_width, new_height = scale_image_to_max_dimension(init_image, max_dimension=1024)
@@ -76,7 +103,7 @@ try:
     inpainted_image = result.images[0]
     
     # Save the inpainting result
-    output_path = f"data/{input_image_path.split('/')[-1].replace('.jpeg', '')}_inpainted.png"
+    output_path = os.path.join(output_dir, f"{base_filename}_inpainted.png")
     inpainted_image.save(output_path)
     print(f"Inpainted image saved to {output_path}")
     
@@ -86,7 +113,7 @@ try:
     comparison_image.paste(inpainted_image, (new_width, 0))
     
     # Save the comparison image
-    comparison_output_path = f"data/{input_image_path.split('/')[-1].replace('.jpeg', '')}_comparison.png"
+    comparison_output_path = os.path.join(output_dir, f"{base_filename}_comparison.png")
     comparison_image.save(comparison_output_path)
     print(f"Comparison image saved to {comparison_output_path}")
 

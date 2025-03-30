@@ -19,7 +19,10 @@ Example notebook: https://github.com/facebookresearch/sam2/blob/main/notebooks/a
 Automatic mask generation function with documentation about the parameters: https://github.com/facebookresearch/sam2/blob/main/sam2/automatic_mask_generator.py
 """
 
-input_image_path = 'data/page_20.jpeg'
+# input_image_path = 'data/digitized versions/Estoire du Graal - Merlin en prose -Suite Vulgate/page_20.jpeg'
+# input_image_path = 'data/digitized versions/Manuscrits numerises de la Bibliotheque municipale de Toulouse/page_37.jpeg'
+input_image_path = 'data/digitized versions/Manuscrits numerises de la Bibliotheque municipale de Toulouse/page_120.jpeg'
+
 
 
 # select the device for computation
@@ -103,7 +106,13 @@ plt.figure(figsize=(20, 20))
 plt.imshow(image)
 show_anns(masks)
 plt.axis('off')
-output_path = f"data/{input_image_path.split('/')[-1].replace('.jpeg', '')}_sam2_masks.png"
+
+# Get the directory path from input image
+output_dir = os.path.dirname(input_image_path)
+base_filename = os.path.splitext(os.path.basename(input_image_path))[0]
+
+# Save the annotated image with masks
+output_path = os.path.join(output_dir, f"{base_filename}_sam2_masks.png")
 plt.savefig(output_path, bbox_inches='tight', pad_inches=0)
 plt.close()
 print(f"Annotated image saved to {output_path}")
@@ -117,6 +126,6 @@ all_masks = [
 
 # Save all masks as images
 for i, mask in enumerate(all_masks):
-    output_mask_path = f"data/{input_image_path.split('/')[-1].replace('.jpeg', '')}_sam2_mask_{i + 1}.png"
+    output_mask_path = os.path.join(output_dir, f"{base_filename}_sam2_mask_{i + 1}.png")
     plt.imsave(output_mask_path, mask, cmap='gray')
     print(f"Mask {i + 1} saved to {output_mask_path}")
