@@ -1,4 +1,5 @@
 name: old_french_ai
+description: Environment for Old French AI project, for use local machine without GPU
 channels:
   - conda-forge
   - defaults

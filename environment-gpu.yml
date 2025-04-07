@@ -1,4 +1,5 @@
-name: old_french_ai
+name: old_french_ai_gpu
+description: Environment for Old French AI project, for use on VM with GPU
 channels:
   - pytorch
   - conda-forge
