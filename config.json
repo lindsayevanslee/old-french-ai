@@ -1,0 +1,25 @@
+{
+    "model_inputs": [
+        {
+            "name": "graal_merlin_page20",
+            "input_image_path": "data/digitized versions/Estoire du Graal - Merlin en prose -Suite Vulgate/page_20.jpeg",
+            "input_mask_path": "data/digitized versions/Estoire du Graal - Merlin en prose -Suite Vulgate/page_20_sam2_mask_4.png",
+            "prompt": "medieval manuscript text, two-column layout, precise margins, text aligned with existing columns, exact same text height as surrounding text, respecting bottom margin, maintaining consistent line spacing, text stopping at the same height as the second column",
+            "negative_prompt": "text extending past bottom margin, text going beyond column boundaries, text not aligned with existing columns, inconsistent line height, text continuing past the last line of the second column, text extending beyond the page margins, text not respecting layout"
+        },
+        {
+            "name": "toulouse_page37",
+            "input_image_path": "data/digitized versions/Manuscrits numerises de la Bibliotheque municipale de Toulouse/page_37.jpeg",
+            "input_mask_path": "data/digitized versions/Manuscrits numerises de la Bibliotheque municipale de Toulouse/page_37_sam2_mask_2.png",
+            "prompt": "medieval illumination style figure drawing, three distinct human figures in brown Benedictine habits, monks seated at wooden table studying manuscript, clear faces with tonsured heads and beards, detailed medieval clothing with flowing robes and hoods, figures interacting with the book, painted in flat medieval art style with strong outlines, muted earth tones and rich jewel colors, composition similar to medieval manuscript illustrations, figures arranged in triangular composition, architectural details of stone arches and columns in background",
+            "negative_prompt": "abstract shapes, decorative patterns without figures, incomplete human forms, modern art style, photorealism, digital art effects, anime or cartoon style, missing faces or bodies, floating elements, unclear figures, modern clothing or accessories, contemporary setting, oversaturated colors, blurry details, missing architectural elements"
+        },
+        {
+            "name": "toulouse_page120",
+            "input_image_path": "data/digitized versions/Manuscrits numerises de la Bibliotheque municipale de Toulouse/page_120.jpeg",
+            "input_mask_path": "data/digitized versions/Manuscrits numerises de la Bibliotheque municipale de Toulouse/page_120_sam2_mask_7.png",
+            "prompt": "medieval illumination style figure drawing, three distinct human figures in brown Benedictine habits, monks seated at wooden table studying manuscript, clear faces with tonsured heads and beards, detailed medieval clothing with flowing robes and hoods, figures interacting with the book, painted in flat medieval art style with strong outlines, muted earth tones and rich jewel colors, composition similar to medieval manuscript illustrations, figures arranged in triangular composition, architectural details of stone arches and columns in background",
+            "negative_prompt": "abstract shapes, decorative patterns without figures, incomplete human forms, modern art style, photorealism, digital art effects, anime or cartoon style, missing faces or bodies, floating elements, unclear figures, modern clothing or accessories, contemporary setting, oversaturated colors, blurry details, missing architectural elements"
+        }
+    ]
+} 
