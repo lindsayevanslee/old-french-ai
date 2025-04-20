@@ -52,8 +52,8 @@ def main():
     # pipeline = StableDiffusionXLInpaintPipeline.from_pretrained(
     pipeline = StableDiffusionInpaintPipeline.from_pretrained(
         # "runwayml/stable-diffusion-inpainting", #deprecated, removed from HG
-        "stabilityai/stable-diffusion-2-inpainting", #doesn't seem to work very well
-        # "stable-diffusion-v1-5/stable-diffusion-inpainting", #mirror of runwayml/stable-diffusion-inpainting, deprecated
+        # "stabilityai/stable-diffusion-2-inpainting", #doesn't seem to work very well
+        "stable-diffusion-v1-5/stable-diffusion-inpainting", #mirror of runwayml/stable-diffusion-inpainting, deprecated
         # "diffusers/stable-diffusion-xl-1.0-inpainting-0.1",
         torch_dtype=torch.float16,
         variant="fp16",
@@ -95,9 +95,9 @@ def main():
                 width=new_width,
                 num_inference_steps=50,
                 guidance_scale=8.5,
-                negative_prompt=config['negative_prompt'],
-                negative_prompt_2=config['negative_prompt'],  # Use the same negative prompt for both encoders
-                strength=0.8,  # Higher strength to better preserve existing style
+                # negative_prompt=config['negative_prompt'],
+                # negative_prompt_2=config['negative_prompt'],  # Use the same negative prompt for both encoders
+                strength=0.7,  # Higher strength to better preserve existing style
                 # denoising_start=0.0,  # Start from the beginning of denoising
                 # denoising_end=1.0,  # Go all the way to the end
                 cross_attention_kwargs={"scale": 0.85},  # Slightly reduce cross-attention to help preserve style
