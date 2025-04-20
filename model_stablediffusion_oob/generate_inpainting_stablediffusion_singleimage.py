@@ -95,9 +95,9 @@ def main():
                 width=new_width,
                 num_inference_steps=50,
                 guidance_scale=8.5,
-                # negative_prompt=config['negative_prompt'],
-                # negative_prompt_2=config['negative_prompt'],  # Use the same negative prompt for both encoders
-                strength=0.7,  # Higher strength to better preserve existing style
+                negative_prompt=config['negative_prompt'],
+                negative_prompt_2=config['negative_prompt'],  # Use the same negative prompt for both encoders
+                strength=0.8,  # Higher strength to better preserve existing style
                 # denoising_start=0.0,  # Start from the beginning of denoising
                 # denoising_end=1.0,  # Go all the way to the end
                 cross_attention_kwargs={"scale": 0.85},  # Slightly reduce cross-attention to help preserve style
@@ -122,6 +122,18 @@ def main():
             comparison_output_path = os.path.join(output_dir, f"{base_filename}_comparison.png")
             comparison_image.save(comparison_output_path)
             print(f"Comparison image saved to {comparison_output_path}")
+            
+            # Create and save an image showing only the inpainted portion
+            # Convert mask to grayscale if it isn't already
+            mask_gray = mask_image.convert('L')
+            # Create a new image with just the inpainted portion
+            inpainted_only = Image.new('RGB', (new_width, new_height), (255, 255, 255))
+            # Paste only the inpainted parts where the mask is white
+            inpainted_only.paste(inpainted_image, (0, 0), mask_gray)
+            # Save the inpainted-only image
+            inpainted_only_path = os.path.join(output_dir, f"{base_filename}_inpainted_only.png")
+            inpainted_only.save(inpainted_only_path)
+            print(f"Inpainted portion only saved to {inpainted_only_path}")
             
         except Exception as e:
             print(f"Error during image generation: {e}")
