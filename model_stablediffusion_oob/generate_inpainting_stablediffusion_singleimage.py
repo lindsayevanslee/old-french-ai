@@ -61,7 +61,8 @@ def main():
         mask_image = Image.open(config['input_mask_path']).convert("RGB")
         
         # Get the directory path from input image
-        output_dir = os.path.dirname(config['input_image_path'])
+        output_dir = f"{os.path.dirname(os.path.dirname(config['input_image_path']))}/model_results/stablediffusion_oob"
+        os.makedirs(output_dir, exist_ok=True)
         base_filename = os.path.splitext(os.path.basename(config['input_image_path']))[0]
         
         # First scale down if needed

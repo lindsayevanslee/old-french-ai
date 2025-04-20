@@ -123,7 +123,8 @@ def main():
     plt.axis('off')
 
     # Get the directory path from input image
-    output_dir = os.path.dirname(config['input_image_path'])
+    output_dir = f"{os.path.dirname(os.path.dirname(config['input_image_path']))}/mask_methods/sam2/masks"
+    os.makedirs(output_dir, exist_ok=True)
     base_filename = os.path.splitext(os.path.basename(config['input_image_path']))[0]
 
     # Save the annotated image with masks
