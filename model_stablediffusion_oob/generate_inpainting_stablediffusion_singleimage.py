@@ -5,12 +5,12 @@ import os
 import json
 import argparse
 import torch
-from diffusers import StableDiffusionInpaintPipeline
+from diffusers import StableDiffusionInpaintPipeline, StableDiffusionXLInpaintPipeline
 from PIL import Image
 import math
 
 # Default configuration name - change this to use a different configuration
-DEFAULT_CONFIG_NAME = "toulouse_page120"
+DEFAULT_CONFIG_NAME = "graal_merlin_page20"
 
 def get_dimensions_divisible_by_8(width, height):
     """Calculate new dimensions that are divisible by 8 while maintaining aspect ratio."""
@@ -49,9 +49,15 @@ def main():
     config = load_config(args.config, args.config_name)
     
     # Load the inpainting pipeline
+    # pipeline = StableDiffusionXLInpaintPipeline.from_pretrained(
     pipeline = StableDiffusionInpaintPipeline.from_pretrained(
-        "runwayml/stable-diffusion-inpainting",
+        # "runwayml/stable-diffusion-inpainting", #deprecated, removed from HG
+        "stabilityai/stable-diffusion-2-inpainting", #doesn't seem to work very well
+        # "stable-diffusion-v1-5/stable-diffusion-inpainting", #mirror of runwayml/stable-diffusion-inpainting, deprecated
+        # "diffusers/stable-diffusion-xl-1.0-inpainting-0.1",
         torch_dtype=torch.float16,
+        variant="fp16",
+        use_safetensors=True,
     )
     pipeline = pipeline.to("cuda")
 
@@ -77,36 +83,53 @@ def main():
         init_image = init_image.resize((new_width, new_height), Image.Resampling.LANCZOS)
         mask_image = mask_image.resize((new_width, new_height), Image.Resampling.NEAREST)
         
-        # Generate the inpainting
-        result = pipeline(
-            prompt=config['prompt'],
-            image=init_image,
-            mask_image=mask_image,
-            height=new_height,
-            width=new_width,
-            num_inference_steps=50,    # Increased for better quality
-            guidance_scale=8.5,        # Moderate guidance scale
-            negative_prompt=config['negative_prompt'],
-        )
-        inpainted_image = result.images[0]
-        
-        # Save the inpainting result
-        output_path = os.path.join(output_dir, f"{base_filename}_inpainted.png")
-        inpainted_image.save(output_path)
-        print(f"Inpainted image saved to {output_path}")
-        
-        # Create a comparison image
-        comparison_image = Image.new('RGB', (new_width * 2, new_height))
-        comparison_image.paste(init_image, (0, 0))
-        comparison_image.paste(inpainted_image, (new_width, 0))
-        
-        # Save the comparison image
-        comparison_output_path = os.path.join(output_dir, f"{base_filename}_comparison.png")
-        comparison_image.save(comparison_output_path)
-        print(f"Comparison image saved to {comparison_output_path}")
+        # Generate the inpainting with error handling
+        try:
+            # For SDXL, we need to provide both prompt and prompt_2
+            result = pipeline(
+                prompt=config['prompt'],
+                prompt_2=config['prompt'],  # Use the same prompt for both encoders
+                image=init_image,
+                mask_image=mask_image,
+                height=new_height,
+                width=new_width,
+                num_inference_steps=50,
+                guidance_scale=8.5,
+                negative_prompt=config['negative_prompt'],
+                negative_prompt_2=config['negative_prompt'],  # Use the same negative prompt for both encoders
+                strength=0.8,  # Higher strength to better preserve existing style
+                # denoising_start=0.0,  # Start from the beginning of denoising
+                # denoising_end=1.0,  # Go all the way to the end
+                cross_attention_kwargs={"scale": 0.85},  # Slightly reduce cross-attention to help preserve style
+            )
+            
+            if result is None or not hasattr(result, 'images') or not result.images:
+                raise ValueError("Pipeline returned no images")
+                
+            inpainted_image = result.images[0]
+            
+            # Save the inpainting result
+            output_path = os.path.join(output_dir, f"{base_filename}_inpainted.png")
+            inpainted_image.save(output_path)
+            print(f"Inpainted image saved to {output_path}")
+            
+            # Create a comparison image
+            comparison_image = Image.new('RGB', (new_width * 2, new_height))
+            comparison_image.paste(init_image, (0, 0))
+            comparison_image.paste(inpainted_image, (new_width, 0))
+            
+            # Save the comparison image
+            comparison_output_path = os.path.join(output_dir, f"{base_filename}_comparison.png")
+            comparison_image.save(comparison_output_path)
+            print(f"Comparison image saved to {comparison_output_path}")
+            
+        except Exception as e:
+            print(f"Error during image generation: {e}")
+            raise
 
     except Exception as e:
         print(f"Error during processing: {e}")
+        raise
 
 if __name__ == "__main__":
     main()
