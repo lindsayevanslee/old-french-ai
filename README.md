@@ -2,7 +2,7 @@
 
 This repository contains tools and models for processing and analyzing medieval French manuscripts using AI techniques. The project includes various components for preprocessing, training, and generating content using different AI models.
 
-Some of this work was first presented at the 2025 International Congress on Medieval Studies in a talk titled "Reimagining What's Lost: Using Generative AI to Interpret Excised Elements of Manuscripts", co-presented with [Loren Lee](https://github.com/leeloren).
+Some of this work was first presented at the 2025 International Congress on Medieval Studies (ICMS) in a talk titled "Reimagining What's Lost: Using Generative AI to Interpret Excised Elements of Manuscripts" and then at the 2025 International Medieval Congress (IMC) in a talk titled "Reimagining What's Lost: Exploring Applications of Generative AI to Fragmentology", both co-presented with [Loren Lee](https://github.com/leeloren).
 
 ## Project Structure
 
